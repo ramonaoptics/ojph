@@ -77,8 +77,8 @@ def get_version_from_git():
     else:
         return
 
-    if os.environ.get("RO_JSON_GIT_DESCRIBE", None):
-        git_describe = os.environ["RO_JSON_GIT_DESCRIBE"]
+    if os.environ.get("OJPH_GIT_DESCRIBE", None):
+        git_describe = os.environ["OJPH_GIT_DESCRIBE"]
     else:
         git_describe = p.communicate()[0].decode()
 
