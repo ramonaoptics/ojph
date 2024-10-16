@@ -70,7 +70,7 @@ jobs:
           conda list
           conda install --yes compilers pybind11 numpy openjph setuptools pytest
           set "OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}"
-          setx "OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}"
+          setx OJPH_GIT_DESCRIBE ${{ steps.ghd.outputs.describe }}
           python -m pip install -e . -vvv --no-deps --no-build-isolation
           python --version
           pip check
