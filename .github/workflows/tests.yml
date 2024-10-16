@@ -47,8 +47,6 @@ jobs:
       - name: Conda info
         shell: bash -el {0}
         run: |
-          conda config --remove channels defaults
-          conda config --add channels mark.harfouche
           conda info
       - name: Conda list
         shell: pwsh
