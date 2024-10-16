@@ -45,32 +45,32 @@ jobs:
           installer-url: ${{ matrix.installer-url }}
           python-version: ${{ matrix.python-version }}
       - name: Conda info
-        if: matrix.os != 'Windows'
+        if: matrix.os != 'windows-latest'
         shell: bash -el {0}
         run: |
           conda info
           conda list
       - name: Conda list
-        if: matrix.os == 'Windows'
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           conda info
           conda list
 
       - name: Install dependencies Windows
-        if: matrix.os == 'Windows'
+        if: matrix.os == 'windows-latest'
         shell: cmd
         run: |
           conda install compilers pybind11 numpy openjph setuptools pytest --yes
 
       - name: Install dependencies Linux
-        if: matrix.os != 'Windows'
+        if: matrix.os != 'windows-latest'
         shell: bash -el {0}
         run: |
           conda install compilers pybind11 numpy openjph setuptools pytest --yes
 
       - name: Install and Test Package (Windows)
-        if: matrix.os == 'Windows'
+        if: matrix.os == 'windows-latest'
         shell: cmd
         run: |
           set OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
@@ -81,7 +81,7 @@ jobs:
           pytest
 
       - name: Install and Test Package (Unix)
-        if: matrix.os != 'Windows'
+        if: matrix.os != 'windows-latest'
         shell: bash -el {0}
         run: |
           export OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
