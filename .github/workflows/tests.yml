@@ -52,8 +52,15 @@ jobs:
         run: |
           conda list
 
-      - name: Install dependencies
-        shell: ${{ matrix.os == 'windows-latest' && 'cmd' || 'bash' }}
+      - name: Install dependencies Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          conda install compilers pybind11 numpy openjph setuptools pytest --yes
+
+      - name: Install dependencies Linux
+        if: runner.os != 'Windows'
+        shell: bash -el {0}
         run: |
           conda install compilers pybind11 numpy openjph setuptools pytest --yes
 
