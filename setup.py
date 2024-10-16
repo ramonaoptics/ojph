@@ -1,4 +1,8 @@
+import platform
+import sys
+import os
 from setuptools import setup, find_packages, Extension
+# Hmm consider nanobind
 import pybind11
 
 with open('README.md', 'r', encoding='utf-8') as fh:
@@ -21,13 +25,23 @@ def get_version_and_cmdclass(pkg_path):
 version, cmdclass = get_version_and_cmdclass("ojph")
 
 # Include the pybind11 include directory
-pybind11_include = pybind11.get_include()
+include_dirs = [pybind11.get_include()]
+library_dirs = []
+
+# Check for windows, add PREFIX/Library to the include dirs for compatibility with conda-forge
+# This doesn't really hurt...
+if platform.system() == 'Windows':
+    prefix = sys.prefix
+    # For conda environments
+    include_dirs.append(os.path.join(prefix, 'Library', 'include'))
+    library_dirs.append(os.path.join(prefix, 'Library', 'lib'))
 
 # Define the extension module
 ojph_module = Extension(
-    'ojph/ojph_bindings',
+    'ojph.ojph_bindings',
     sources=['ojph/ojph_bindings.cpp'],
-    include_dirs=[pybind11_include],
+    include_dirs=include_dirs,
+    library_dirs=library_dirs,
     libraries=['openjph'],
     extra_compile_args=[]
 )
