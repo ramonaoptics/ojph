@@ -53,20 +53,27 @@ jobs:
           conda list
 
       - name: Install dependencies
-        shell: bash -el {0}
+        shell: ${{ matrix.os == 'windows-latest' && 'cmd' || 'bash' }}
         run: |
           conda install compilers pybind11 numpy openjph setuptools pytest --yes
 
-      - name: Install package
+      - name: Install and Test Package (Unix)
+        if: runner.os != 'Windows'
         shell: bash -el {0}
         run: |
           export OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
           python -m pip install -e . -vvv
+          python --version
+          pip check
+          python -c "import ojph; print(ojph.__version__)"
+          pytest
 
-      - name: Run tests
-        shell: bash -el {0}
+      - name: Install and Test Package (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
         run: |
-          export OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
+          set OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
+          python -m pip install -e . -vvv
           python --version
           pip check
           python -c "import ojph; print(ojph.__version__)"
