@@ -38,7 +38,7 @@ def imwrite(filename, image):
     bit_depth = image.dtype.itemsize * 8
     # Is there a better way to detect signed dtypes???
     is_signed = image.dtype.kind != 'u'
-    siz.set_num_components(num_components);
+    siz.set_num_components(num_components)
     for i in range(num_components):
         # is it necessary to do this in a loop?
         siz.set_component(
@@ -75,7 +75,7 @@ def imwrite(filename, image):
                 line_array[...] = image[i, :]
             else:
                 line_array[...] = image[i, :, c]
-            c_before = c
+            # c_before = c
             line = codestream.exchange(line, c)
 
     codestream.flush()
