@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import ctypes
 from .ojph_bindings import J2CInfile, Codestream
@@ -19,13 +18,19 @@ def imread(uri, *, index=None, plugin=None, extension=None, format_hint=None, **
 
 
 class OJPHImageFile:
-    def __init__(self, filename):
+    def __init__(self, filename, *, mode='r'):
+        if mode != 'r':
+            raise ValueError(f"We only support mode = 'r' for now. Got {mode}.")
         self._codestream = None
         self._ojph_file = None
         self._filename = filename
 
-        self._ojph_file = J2CInfile()
-        self._ojph_file.open(str(filename))
+        ojph_file = J2CInfile()
+        ojph_file.open(str(filename))
+        # An exception can occur and if we call close in our destructor because
+        # we think the file has been opened successfully then it breaks things
+        # the C++ destructor will check if the filehandle is not None
+        self._ojph_file = ojph_file
         self._codestream = Codestream()
         self._codestream.read_headers(self._ojph_file)
 
@@ -51,6 +56,14 @@ class OJPHImageFile:
             self._dtype = np.int32
         else:
             raise ValueError("Unsupported bit depth")
+
+    @property
+    def shape(self):
+        return self._shape
+
+    @property
+    def dtype(self):
+        return self._dtype
 
     def _open_file(self):
         self._ojph_file = J2CInfile()

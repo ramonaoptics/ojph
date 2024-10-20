@@ -17,10 +17,16 @@ jobs:
         include:
           - os: "ubuntu-latest"
             installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+            python-version: "3.13"
+          - os: "ubuntu-latest"
+            installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+            python-version: "3.10"
           - os: "macos-latest"
             installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-x86_64.sh"
-          - os: "windows-latest"
-            installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe"
+            python-version: "3.9"
+         #  - os: "windows-latest"
+         #    installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe"
+         #    python-version: "3.12"
       max-parallel: 8
       fail-fast: false
 
@@ -41,32 +47,31 @@ jobs:
           auto-update-conda: true
           installer-url: ${{ matrix.installer-url }}
           python-version: ${{ matrix.python-version }}
-      - name: Conda info
+
+      - name: Install and Test Package (Unix)
+        if: matrix.os != 'windows-latest'
         shell: bash -el {0}
         run: |
-          conda config --remove channels defaults
-          conda config --add channels mark.harfouche
           conda info
-      - name: Conda list
+          conda list
+          conda install compilers pybind11 numpy openjph setuptools pytest --yes
+          export OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
+          python -m pip install -e . -vvv --no-deps --no-build-isolation
+          python --version
+          pip check
+          python -c "import ojph; print(ojph.__version__)"
+          pytest
+
+      - name: Install and Test Package (Windows)
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          conda info
           conda list
-
-      - name: Install dependencies
-        shell: bash -el {0}
-        run: |
-          conda install compilers pybind11 numpy openjph setuptools pytest --yes
-
-      - name: Install package
-        shell: bash -el {0}
-        run: |
-          export OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
-          python -m pip install -e . -vvv
-
-      - name: Run tests
-        shell: bash -el {0}
-        run: |
-          export OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
+          conda install --yes compilers pybind11 numpy openjph setuptools pytest git
+          set "OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}"
+          setx OJPH_GIT_DESCRIBE ${{ steps.ghd.outputs.describe }}
+          python -m pip install -e . -vvv --no-deps --no-build-isolation
           python --version
           pip check
           python -c "import ojph; print(ojph.__version__)"
