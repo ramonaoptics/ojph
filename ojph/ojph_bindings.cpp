@@ -54,6 +54,22 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("tell", &j2c_outfile::tell)
         .def("close", &j2c_outfile::close);
 
+    py::class_<mem_outfile, outfile_base>(m, "MemOutfile")
+        .def(py::init<>())
+        .def("open", &mem_outfile::open, py::arg("initial_size") = 65536, py::arg("clear_mem") = false)
+        .def("write", &mem_outfile::write)
+        .def("tell", &mem_outfile::tell)
+        .def("seek", [](mem_outfile& self, si64 offset, int origin) {
+            return self.seek(offset, static_cast<enum outfile_base::seek>(origin));
+        })
+        .def("close", &mem_outfile::close)
+        .def("write_to_file", &mem_outfile::write_to_file)
+        .def("get_data", [](mem_outfile& self) {
+            const ui8* data = self.get_data();
+            si64 size = self.tell();
+            return py::memoryview::from_memory(data, size);
+        }, py::keep_alive<0, 1>());
+
     // Bindings for codestream class
     py::class_<codestream>(m, "Codestream")
         .def(py::init<>())
@@ -180,4 +196,3 @@ PYBIND11_MODULE(ojph_bindings, m) {
     ;
 
 }
-

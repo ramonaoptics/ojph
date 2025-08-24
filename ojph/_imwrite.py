@@ -1,7 +1,62 @@
 import numpy as np
 import ctypes
 
-from .ojph_bindings import Codestream, J2COutfile, Point
+from .ojph_bindings import Codestream, J2COutfile, MemOutfile, Point
+
+
+class CompressedData:
+    def __init__(self, mem_file):
+        self._mem_file = mem_file
+
+    def __del__(self):
+        """Clean up the memory file when this object is garbage collected."""
+        if self._mem_file is not None:
+            self._mem_file.close()
+        self._mem_file = None
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, key):
+        return np.asarray(self, copy=True)[key]
+
+    def copy(self):
+        """Create a copy of the data."""
+        return np.asarray(self, copy=True)
+
+    def tobytes(self):
+        """Convert to bytes."""
+        return np.asarray(self).tobytes()
+
+    @property
+    def size(self):
+        return self._mem_file.tell()
+
+    @property
+    def shape(self):
+        return (self.size,)
+
+    @property
+    def dtype(self):
+        return np.uint8
+
+    def __array__(self, dtype=None, *, copy=None):
+        """Convert to numpy array."""
+        if copy is not None and not copy:
+            raise ValueError(f"A copy is required for operations on {self.__class__}")
+
+        memoryview = self._mem_file.get_data()
+        assert memoryview.readonly, "Memoryview must be readonly"
+        array = np.asarray(memoryview, dtype=np.uint8)
+        if dtype is not None:
+            array = array.astype(dtype)
+        return array
+
+def imwrite_to_memory(image):
+    mem_outfile = MemOutfile()
+    mem_outfile.open(65536, False)
+    imwrite(mem_outfile, image)
+    return CompressedData(mem_outfile)
 
 
 def imwrite(filename, image):
@@ -19,8 +74,13 @@ def imwrite(filename, image):
             f"with the image dimensions ({image.ndim})."
         )
 
-    ojph_file = J2COutfile()
-    ojph_file.open(str(filename))
+    if isinstance(filename, MemOutfile):
+        ojph_file = filename
+        is_mem_file = True
+    else:
+        ojph_file = J2COutfile()
+        ojph_file.open(str(filename))
+        is_mem_file = False
     codestream = Codestream()
 
     siz = codestream.access_siz()
@@ -31,7 +91,7 @@ def imwrite(filename, image):
     # is_planar = 'C' in channel_order
     siz.set_image_extent(Point(width, height))
     if 'C' in channel_order:
-        num_components = channel_order.index('C')
+        num_components = image.shape[channel_order.index('C')]
     else:
         num_components = 1
 
@@ -79,4 +139,7 @@ def imwrite(filename, image):
             line = codestream.exchange(line, c)
 
     codestream.flush()
-    codestream.close()
+    if not is_mem_file:
+        # This will close the file as well
+        # We do not want to close the memfile
+        codestream.close()
