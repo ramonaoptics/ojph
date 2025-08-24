@@ -34,11 +34,17 @@ class OJPHImageFile:
         self._codestream = Codestream()
         self._codestream.read_headers(self._ojph_file)
 
-
         siz = self._codestream.access_siz()
         extents = siz.get_image_extent()
-        self._shape = extents.y, extents.x
+        num_components = siz.get_num_components()
+
+        if num_components == 1:
+            self._shape = extents.y, extents.x
+        else:
+            self._shape = extents.y, extents.x, num_components
+
         self._is_planar = self._codestream.is_planar()
+        self._num_components = num_components
 
         bit_depth = siz.get_bit_depth(0)
         is_signed = siz.is_signed(0)
@@ -82,22 +88,40 @@ class OJPHImageFile:
         width = siz.get_recon_width(0)
         self._codestream.create()
 
-        image = np.zeros(
-            (height, width),
-            dtype=self._dtype
-        )
+        if self._num_components == 1:
+            image = np.zeros((height, width), dtype=self._dtype)
 
-        for h in range(height):
-            line = self._codestream.pull(0)
-            # Convert the address to a ctypes pointer to int32
-            i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+            for h in range(height):
+                line = self._codestream.pull(0)
+                i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+                line_array = np.ctypeslib.as_array(
+                    ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
+                    shape=(line.size,)
+                )
+                image[h] = line_array
+        else:
+            image = np.zeros((height, width, self._num_components), dtype=self._dtype)
 
-            # Calculate the total number of bytes (size of the array in elements * size of int32)
-            line_array = np.ctypeslib.as_array(
-                ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                shape=(line.size,)
-            )
-            image[h] = line_array
+            if self._is_planar:
+                for c in range(self._num_components):
+                    for h in range(height):
+                        line = self._codestream.pull(c)
+                        i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+                        line_array = np.ctypeslib.as_array(
+                            ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
+                            shape=(line.size,)
+                        )
+                        image[h, :, c] = line_array
+            else:
+                for h in range(height):
+                    for c in range(self._num_components):
+                        line = self._codestream.pull(c)
+                        i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+                        line_array = np.ctypeslib.as_array(
+                            ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
+                            shape=(line.size,)
+                        )
+                        image[h, :, c] = line_array
 
         self._close_codestream_and_file()
         return image
