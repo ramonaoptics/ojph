@@ -64,7 +64,6 @@ setup(
         'License :: OSI Approved :: BSD License',
         'Operating System :: OS Independent',
         'Programming Language :: Python :: 3 :: Only',
-        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
@@ -73,7 +72,7 @@ setup(
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
     packages=find_packages(exclude=["tests*"]),
-    python_requires='>=3.9',
+    python_requires='>=3.10',
     install_requires=[
         'numpy>=1.24.0',
     ],
@@ -82,4 +81,3 @@ setup(
     include_package_data=True,
     zip_safe=False
 )
-
