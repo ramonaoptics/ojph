@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 
 
 #include <openjph/ojph_file.h>
@@ -31,8 +32,26 @@ PYBIND11_MODULE(ojph_bindings, m) {
 
     py::class_<mem_infile, infile_base>(m, "MemInfile")
         .def(py::init<>())
-        .def("open", &mem_infile::open)
-        .def("read", &mem_infile::read)
+        .def("open", [](mem_infile& self, py::array_t<ui8> data) {
+            py::buffer_info buf = data.request();
+            if (buf.ndim != 1) {
+                throw py::value_error("Data must be a 1-dimensional array");
+            }
+            self.open(static_cast<const ui8*>(buf.ptr), buf.size);
+        }, py::arg("data"))
+        .def("open", [](mem_infile& self, const ui8* data, size_t size) {
+            self.open(data, size);
+        }, py::arg("data"), py::arg("size"))
+        .def("read", [](mem_infile& self, py::array_t<ui8> buffer, size_t size) {
+            py::buffer_info buf = buffer.request();
+            if (buf.ndim != 1) {
+                throw py::value_error("Buffer must be a 1-dimensional array");
+            }
+            if (buf.size < size) {
+                throw py::value_error("Buffer size is smaller than requested read size");
+            }
+            return self.read(static_cast<void*>(buf.ptr), size);
+        }, py::arg("buffer"), py::arg("size"))
         .def("seek", [](mem_infile& self, si64 offset, int origin) {
             return self.seek(offset, static_cast<enum infile_base::seek>(origin));
         })

@@ -1,6 +1,6 @@
 import numpy as np
 import ctypes
-from .ojph_bindings import J2CInfile, Codestream
+from .ojph_bindings import J2CInfile, MemInfile, Codestream
 from warnings import warn
 
 # Copy the imageio.v3.imread signature
@@ -17,6 +17,33 @@ def imread(uri, *, index=None, plugin=None, extension=None, format_hint=None, **
     return OJPHImageFile(uri).read_image()
 
 
+def imread_from_memory(data):
+    """
+    Read a JPEG2000 image from memory data.
+
+    Parameters
+    ----------
+    data : numpy.ndarray or bytes-like
+        The compressed JPEG2000 data as a numpy array or bytes-like object.
+
+    Returns
+    -------
+    numpy.ndarray
+        The decoded image.
+    """
+    if isinstance(data, (bytes, bytearray)):
+        data = np.frombuffer(data, dtype=np.uint8)
+    elif not isinstance(data, np.ndarray):
+        data = np.asarray(data, dtype=np.uint8)
+
+    if data.ndim != 1:
+        raise ValueError("Data must be a 1-dimensional array or bytes-like object")
+
+    mem_infile = MemInfile()
+    mem_infile.open(data)
+    return OJPHImageFile(mem_infile).read_image()
+
+
 class OJPHImageFile:
     def __init__(self, filename, *, mode='r'):
         if mode != 'r':
@@ -24,13 +51,15 @@ class OJPHImageFile:
         self._codestream = None
         self._ojph_file = None
         self._filename = filename
+        self._is_mem_file = False
+        if isinstance(filename, MemInfile):
+            self._ojph_file = filename
+            self._is_mem_file = True
+        else:
+            ojph_file = J2CInfile()
+            ojph_file.open(str(filename))
+            self._ojph_file = ojph_file
 
-        ojph_file = J2CInfile()
-        ojph_file.open(str(filename))
-        # An exception can occur and if we call close in our destructor because
-        # we think the file has been opened successfully then it breaks things
-        # the C++ destructor will check if the filehandle is not None
-        self._ojph_file = ojph_file
         self._codestream = Codestream()
         self._codestream.read_headers(self._ojph_file)
 
@@ -62,6 +91,63 @@ class OJPHImageFile:
             self._dtype = np.int32
         else:
             raise ValueError(f"Unsupported bit depth: {bit_depth}, signed: {is_signed}")
+
+    @classmethod
+    def from_memory(cls, data):
+        """
+        Create an OJPHImageFile instance from memory data.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            The compressed JPEG2000 data as a numpy array.
+
+        Returns
+        -------
+        OJPHImageFile
+            An instance configured to read from the memory data.
+        """
+        instance = cls.__new__(cls)
+        instance._codestream = None
+        instance._ojph_file = None
+        instance._filename = None
+
+        ojph_file = MemInfile()
+        ojph_file.open(data)
+        instance._ojph_file = ojph_file
+        instance._codestream = Codestream()
+        instance._codestream.read_headers(ojph_file)
+
+        siz = instance._codestream.access_siz()
+        extents = siz.get_image_extent()
+        num_components = siz.get_num_components()
+
+        if num_components == 1:
+            instance._shape = extents.y, extents.x
+        else:
+            instance._shape = extents.y, extents.x, num_components
+
+        instance._is_planar = instance._codestream.is_planar()
+        instance._num_components = num_components
+
+        bit_depth = siz.get_bit_depth(0)
+        is_signed = siz.is_signed(0)
+        if bit_depth == 8 and not is_signed:
+            instance._dtype = np.uint8
+        elif bit_depth == 8 and is_signed:
+            instance._dtype = np.int8
+        elif bit_depth == 16 and not is_signed:
+            instance._dtype = np.uint16
+        elif bit_depth == 16 and is_signed:
+            instance._dtype = np.int16
+        elif bit_depth == 32 and not is_signed:
+            instance._dtype = np.uint32
+        elif bit_depth == 32 and is_signed:
+            instance._dtype = np.int32
+        else:
+            raise ValueError(f"Unsupported bit depth: {bit_depth}, signed: {is_signed}")
+
+        return instance
 
     @property
     def shape(self):

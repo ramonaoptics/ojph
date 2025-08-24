@@ -5,11 +5,15 @@ from .ojph_bindings import Codestream, J2COutfile, MemOutfile, Point
 
 
 class CompressedData:
-    def __init__(self, mem_file):
+    def __init__(self, mem_file, codestream):
         self._mem_file = mem_file
+        self._codestream = codestream
 
     def __del__(self):
         """Clean up the memory file when this object is garbage collected."""
+        if self._codestream is not None:
+            self._codestream.close()
+        self._codestream = None
         if self._mem_file is not None:
             self._mem_file.close()
         self._mem_file = None
@@ -55,8 +59,8 @@ class CompressedData:
 def imwrite_to_memory(image, *, channel_order=None):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
-    imwrite(mem_outfile, image, channel_order=channel_order)
-    return CompressedData(mem_outfile)
+    codestream = imwrite(mem_outfile, image, channel_order=channel_order)
+    return CompressedData(mem_outfile, codestream)
 
 
 def imwrite(filename, image, *, channel_order=None):
@@ -168,3 +172,5 @@ def imwrite(filename, image, *, channel_order=None):
     codestream.flush()
     if not is_mem_file:
         codestream.close()
+    else:
+        return codestream
