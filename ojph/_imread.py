@@ -61,7 +61,7 @@ class OJPHImageFile:
         elif bit_depth == 32 and is_signed:
             self._dtype = np.int32
         else:
-            raise ValueError("Unsupported bit depth")
+            raise ValueError(f"Unsupported bit depth: {bit_depth}, signed: {is_signed}")
 
     @property
     def shape(self):
@@ -89,6 +89,7 @@ class OJPHImageFile:
         self._codestream.create()
 
         if self._num_components == 1:
+            # Single component - always HW format
             image = np.zeros((height, width), dtype=self._dtype)
 
             for h in range(height):
@@ -100,9 +101,13 @@ class OJPHImageFile:
                 )
                 image[h] = line_array
         else:
-            image = np.zeros((height, width, self._num_components), dtype=self._dtype)
+            # Multi-component - optimize for RGB images using color transform detection
+            is_rgb = self._codestream.access_cod().is_using_color_transform()
 
-            if self._is_planar:
+            if is_rgb:
+                # RGB image - always return HWC format for optimal compatibility
+                image = np.zeros((height, width, self._num_components), dtype=self._dtype)
+
                 for c in range(self._num_components):
                     for h in range(height):
                         line = self._codestream.pull(c)
@@ -113,15 +118,33 @@ class OJPHImageFile:
                         )
                         image[h, :, c] = line_array
             else:
-                for h in range(height):
+                # Non-RGB multi-component - use planar flag for format detection
+                if self._is_planar:
+                    # Planar mode was used for writing - return CHW format
+                    image = np.zeros((self._num_components, height, width), dtype=self._dtype)
+
                     for c in range(self._num_components):
-                        line = self._codestream.pull(c)
-                        i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
-                        line_array = np.ctypeslib.as_array(
-                            ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                            shape=(line.size,)
-                        )
-                        image[h, :, c] = line_array
+                        for h in range(height):
+                            line = self._codestream.pull(c)
+                            i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+                            line_array = np.ctypeslib.as_array(
+                                ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
+                                shape=(line.size,)
+                            )
+                            image[c, h, :] = line_array
+                else:
+                    # Non-planar mode was used for writing - return HWC format
+                    image = np.zeros((height, width, self._num_components), dtype=self._dtype)
+
+                    for c in range(self._num_components):
+                        for h in range(height):
+                            line = self._codestream.pull(c)
+                            i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+                            line_array = np.ctypeslib.as_array(
+                                ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
+                                shape=(line.size,)
+                            )
+                            image[h, :, c] = line_array
 
         self._close_codestream_and_file()
         return image

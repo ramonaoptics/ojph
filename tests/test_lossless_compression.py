@@ -74,6 +74,43 @@ def test_write_lossless_color(shape, tmp_path):
 
 
 @pytest.mark.parametrize(
+    'channel_order', ['HWC', 'CHW'],
+)
+@pytest.mark.parametrize(
+    'chroma', ['rgb', 'rgba'],
+)
+def test_write_lossless_channel_order(channel_order, chroma, tmp_path):
+    filename = tmp_path / 'test.jp2'
+
+    if channel_order == 'HWC':
+        # Create HWC data: (height, width, channels)
+        data = np.random.randint(0, 256, (100, 150, 4), dtype=np.uint8)
+        if chroma == 'rgb':
+            data = data[:, :, :3]
+        else:
+            data = data[:, :, :4]
+    else:  # CHW
+        # Create CHW data: (channels, height, width)
+        data = np.random.randint(0, 256, (4, 100, 150), dtype=np.uint8)
+        if chroma == 'rgb':
+            data = data[:3, :, :]
+        else:
+            data = data[:4, :, :]
+
+    imwrite(filename, data, channel_order=channel_order)
+    image_read = imread(filename)
+
+    # Only HWC RGB/RGBA images get color transform and return HWC format
+    # CHW images preserve their original format
+    if channel_order == 'HWC':
+        # HWC input -> HWC output (with color transform optimization)
+        np.testing.assert_array_equal(data, image_read)
+    else:  # CHW
+        # CHW input -> CHW output (preserves format)
+        np.testing.assert_array_equal(data, image_read)
+
+
+@pytest.mark.parametrize(
     'dtype', [
         np.uint8,
         np.int8,
@@ -173,3 +210,25 @@ def test_write_lossless_small_images(tmp_path):
     imwrite(filename, data_tiny_rgba)
     image_read = imread(filename)
     np.testing.assert_array_equal(data_tiny_rgba, image_read)
+
+
+def test_channel_order_validation(tmp_path):
+    filename = tmp_path / 'test.jp2'
+
+    # Test invalid channel order
+    data = np.random.randint(0, 256, (100, 150, 3), dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="Invalid channel_order"):
+        imwrite(filename, data, channel_order='WHC')
+
+    with pytest.raises(ValueError, match="Invalid channel_order"):
+        imwrite(filename, data, channel_order='CWH')
+
+    # Test channel order mismatch with dimensions
+    with pytest.raises(ValueError, match="must be consistent"):
+        imwrite(filename, data, channel_order='HW')
+
+    # Test 2D image with 3D channel order
+    data_2d = np.random.randint(0, 256, (100, 150), dtype=np.uint8)
+    with pytest.raises(ValueError, match="must be consistent"):
+        imwrite(filename, data_2d, channel_order='HWC')

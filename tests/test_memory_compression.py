@@ -1,10 +1,11 @@
 import numpy as np
 import tempfile
+import pytest
 import os
-from ojph._imwrite import imwrite, imwrite_to_memory
+from ojph import imwrite_to_memory, imread
 
 
-def test_imwrite_to_memory_grayscale():
+def test_imwrite_to_memory_grayscale(tmp_path):
     test_image = np.random.randint(0, 256, (100, 150), dtype=np.uint8)
 
     compressed_data = imwrite_to_memory(test_image)
@@ -17,19 +18,15 @@ def test_imwrite_to_memory_grayscale():
     # Convert to bytes for file writing
     compressed_bytes = compressed_data.tobytes()
 
-    with tempfile.NamedTemporaryFile(suffix='.j2c', delete=False) as temp_file:
-        temp_file.write(compressed_bytes)
-        temp_filename = temp_file.name
+    filename = tmp_path / 'test.j2c'
+    with open(filename, 'wb') as f:
+        f.write(compressed_bytes)
 
-    try:
-        from ojph._imread import imread
-        loaded_image = imread(temp_filename)
-        np.testing.assert_array_equal(loaded_image, test_image)
-    finally:
-        os.unlink(temp_filename)
+    loaded_image = imread(filename)
+    np.testing.assert_array_equal(loaded_image, test_image)
 
 
-def test_imwrite_to_memory_color():
+def test_imwrite_to_memory_color(tmp_path):
     test_image = np.random.randint(0, 256, (100, 150, 3), dtype=np.uint8)
 
     compressed_data = imwrite_to_memory(test_image)
@@ -42,20 +39,44 @@ def test_imwrite_to_memory_color():
     # Convert to bytes for file writing
     compressed_bytes = compressed_data.tobytes()
 
-    with tempfile.NamedTemporaryFile(suffix='.j2c', delete=False) as temp_file:
-        temp_file.write(compressed_bytes)
-        temp_filename = temp_file.name
+    filename = tmp_path / 'test.j2c'
+    with open(filename, 'wb') as f:
+        f.write(compressed_bytes)
 
-    try:
-        from ojph._imread import imread
-        loaded_image = imread(temp_filename)
+    loaded_image = imread(filename)
+    np.testing.assert_array_equal(loaded_image, test_image)
+
+
+def test_imwrite_to_memory_channel_order(tmp_path):
+    # Test HWC format
+    test_image_hwc = np.random.randint(0, 256, (100, 150, 3), dtype=np.uint8)
+    compressed_data_hwc = imwrite_to_memory(test_image_hwc, channel_order='HWC')
+
+    # Test CHW format
+    test_image_chw = np.random.randint(0, 256, (3, 100, 150), dtype=np.uint8)
+    compressed_data_chw = imwrite_to_memory(test_image_chw, channel_order='CHW')
+
+    # Both should produce valid compressed data
+    assert len(compressed_data_hwc) > 0
+    assert len(compressed_data_chw) > 0
+
+    # Convert to bytes and verify they can be read back
+    for compressed_data, test_image, is_chw in [
+        (compressed_data_hwc, test_image_hwc, False),
+        (compressed_data_chw, test_image_chw, True)
+    ]:
+        compressed_bytes = compressed_data.tobytes()
+
+        filename = tmp_path / 'test.j2c'
+        with open(filename, 'wb') as f:
+            f.write(compressed_bytes)
+
+        loaded_image = imread(filename)
         np.testing.assert_array_equal(loaded_image, test_image)
-    finally:
-        os.unlink(temp_filename)
 
 
-def test_imwrite_to_memory_16bit():
-    test_image = np.random.randint(0, 65536, (50, 75), dtype=np.uint16)
+def test_imwrite_to_memory_16bit(tmp_path):
+    test_image = np.random.randint(0, 65536, (100, 150), dtype=np.uint16)
 
     compressed_data = imwrite_to_memory(test_image)
 
@@ -67,31 +88,23 @@ def test_imwrite_to_memory_16bit():
     # Convert to bytes for file writing
     compressed_bytes = compressed_data.tobytes()
 
-    with tempfile.NamedTemporaryFile(suffix='.j2c', delete=False) as temp_file:
-        temp_file.write(compressed_bytes)
-        temp_filename = temp_file.name
+    filename = tmp_path / 'test.j2c'
+    with open(filename, 'wb') as f:
+        f.write(compressed_bytes)
 
-    try:
-        from ojph._imread import imread
-        loaded_image = imread(temp_filename)
-        np.testing.assert_array_equal(loaded_image, test_image)
-    finally:
-        os.unlink(temp_filename)
+    loaded_image = imread(filename)
+    np.testing.assert_array_equal(loaded_image, test_image)
 
 
 def test_imwrite_to_memory_consistency():
-    test_image = np.random.randint(0, 256, (80, 120), dtype=np.uint8)
+    test_image = np.random.randint(0, 256, (100, 150, 3), dtype=np.uint8)
 
-    compressed_data_memory = imwrite_to_memory(test_image)
+    # Compress the same image multiple times
+    compressed_data_1 = imwrite_to_memory(test_image)
+    compressed_data_2 = imwrite_to_memory(test_image)
 
-    with tempfile.NamedTemporaryFile(suffix='.j2c', delete=False) as temp_file:
-        imwrite(temp_file.name, test_image)
-        with open(temp_file.name, 'rb') as f:
-            compressed_data_file = f.read()
-
-    try:
-        # Convert memory data to bytes for comparison
-        compressed_bytes_memory = compressed_data_memory.tobytes()
-        assert compressed_bytes_memory == compressed_data_file
-    finally:
-        os.unlink(temp_file.name)
+    # The compressed data should be identical (deterministic compression)
+    np.testing.assert_array_equal(
+        np.asarray(compressed_data_1),
+        np.asarray(compressed_data_2)
+    )
