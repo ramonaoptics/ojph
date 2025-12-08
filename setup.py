@@ -36,7 +36,6 @@ if platform.system() == 'Windows':
     include_dirs.append(os.path.join(prefix, 'Library', 'include'))
     library_dirs.append(os.path.join(prefix, 'Library', 'lib'))
 
-# Define the extension module
 ojph_module = Extension(
     'ojph.ojph_bindings',
     sources=['ojph/ojph_bindings.cpp'],
@@ -46,7 +45,6 @@ ojph_module = Extension(
     extra_compile_args=[]
 )
 
-# Setup
 setup(
     name='ojph',
     version=version,
@@ -64,8 +62,6 @@ setup(
         'License :: OSI Approved :: BSD License',
         'Operating System :: OS Independent',
         'Programming Language :: Python :: 3 :: Only',
-        'Programming Language :: Python :: 3.10',
-        'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
         'Programming Language :: Python :: 3.14',
@@ -73,7 +69,7 @@ setup(
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
     packages=find_packages(exclude=["tests*"]),
-    python_requires='>=3.10',
+    python_requires='>=3.12',
     install_requires=[
         'numpy>=1.24.0',
     ],
