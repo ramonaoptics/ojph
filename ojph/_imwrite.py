@@ -1,13 +1,16 @@
 import numpy as np
 import ctypes
+import inspect
+from collections.abc import Buffer
 
 from .ojph_bindings import Codestream, J2COutfile, MemOutfile, Point
 
 
-class CompressedData:
+class CompressedData(Buffer):
     def __init__(self, mem_file, codestream):
         self._mem_file = mem_file
         self._codestream = codestream
+        self._memoryview = None
 
     def __del__(self):
         """Clean up the memory file when this object is garbage collected."""
@@ -17,53 +20,25 @@ class CompressedData:
         if self._mem_file is not None:
             self._mem_file.close()
         self._mem_file = None
+        self._memoryview = None
 
-    def __len__(self):
-        return self.size
+    def __buffer__(self, flags: int) -> Buffer:
+        if flags & inspect.BufferFlags.WRITABLE:
+            raise TypeError("CompressedData is read-only")
+        if self._memoryview is None:
+            self._memoryview = self._mem_file.get_data()
+        return self._memoryview
 
-    def __getitem__(self, key):
-        return np.asarray(self, copy=True)[key]
-
-    def copy(self):
-        """Create a copy of the data."""
-        return np.asarray(self, copy=True)
-
-    def tobytes(self):
-        """Convert to bytes."""
-        return np.asarray(self).tobytes()
-
-    @property
-    def size(self):
-        return self._mem_file.get_used_size()
-
-    @property
-    def shape(self):
-        return (self.size,)
-
-    @property
-    def dtype(self):
-        return np.uint8
-
-    def __array__(self, dtype=None, *, copy=None):
-        """Convert to numpy array."""
-        if copy is not None and not copy:
-            raise ValueError(f"A copy is required for operations on {self.__class__}")
-
-        memoryview = self._mem_file.get_data()
-        assert memoryview.readonly, "Memoryview must be readonly"
-        array = np.asarray(memoryview, dtype=np.uint8)
-        if dtype is not None:
-            array = array.astype(dtype)
-        return array
 
 def imwrite_to_memory(image, *, channel_order=None):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
-    codestream = imwrite(mem_outfile, image, channel_order=channel_order)
-    return CompressedData(mem_outfile, codestream)
+    codestream = Codestream()
+    imwrite(mem_outfile, image, channel_order=channel_order, codestream=codestream)
+    return np.asarray(CompressedData(mem_outfile, codestream))
 
 
-def imwrite(filename, image, *, channel_order=None):
+def imwrite(filename, image, *, channel_order=None, codestream=None):
     # Auto-detect channel order if not provided
     if channel_order is None:
         if image.ndim == 2:
@@ -94,7 +69,10 @@ def imwrite(filename, image, *, channel_order=None):
         ojph_file = J2COutfile()
         ojph_file.open(str(filename))
         is_mem_file = False
-    codestream = Codestream()
+
+    close_codestream = codestream is None
+    if codestream is None:
+        codestream = Codestream()
 
     siz = codestream.access_siz()
     width = image.shape[channel_order.index('W')]
@@ -170,7 +148,5 @@ def imwrite(filename, image, *, channel_order=None):
                     line = codestream.exchange(line, c)
 
     codestream.flush()
-    if not is_mem_file:
+    if close_codestream:
         codestream.close()
-    else:
-        return codestream
