@@ -78,6 +78,8 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("open", &mem_outfile::open, py::arg("initial_size") = 65536, py::arg("clear_mem") = false)
         .def("write", &mem_outfile::write)
         .def("tell", &mem_outfile::tell)
+        .def("get_used_size", &mem_outfile::get_used_size)
+        .def("get_buf_size", &mem_outfile::get_buf_size)
         .def("seek", [](mem_outfile& self, si64 offset, int origin) {
             return self.seek(offset, static_cast<enum outfile_base::seek>(origin));
         })

@@ -34,7 +34,7 @@ class CompressedData:
 
     @property
     def size(self):
-        return self._mem_file.tell()
+        return self._mem_file.get_used_size()
 
     @property
     def shape(self):
