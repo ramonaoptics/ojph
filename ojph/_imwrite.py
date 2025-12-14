@@ -96,17 +96,8 @@ def imwrite(filename, image, *, channel_order=None, codestream=None):
         )
     cod = codestream.access_cod()
     cod.set_reversible(True)
-
-    # Enable color transform for RGB/RGBA images in HWC format (3 or 4 components)
-    # This enables automatic RGB detection via is_employing_color_transform()
-    if num_components in [3, 4] and channel_order == 'HWC':
-        cod.set_color_transform(True)
-        # Color transform requires non-planar mode
-        codestream.set_planar(False)
-    else:
-        # Use planar mode for better efficiency with other multi-component images
-        # This processes each component separately, improving cache locality
-        codestream.set_planar(num_components > 1)
+    cod.set_color_transform(False)
+    codestream.set_planar(num_components > 1)
 
     codestream.write_headers(ojph_file, None, 0)
     c = 0

@@ -68,7 +68,7 @@ def test_write_lossless_color(shape, tmp_path):
     filename = tmp_path / 'test.jp2'
     data = np.random.randint(0, 256, shape, dtype=np.uint8)
     imwrite(filename, data)
-    image_read = imread(filename)
+    image_read = imread(filename, channel_order='HWC')
 
     np.testing.assert_array_equal(data, image_read)
 
@@ -98,7 +98,7 @@ def test_write_lossless_channel_order(channel_order, chroma, tmp_path):
             data = data[:4, :, :]
 
     imwrite(filename, data, channel_order=channel_order)
-    image_read = imread(filename)
+    image_read = imread(filename, channel_order=channel_order).reshape(data.shape)
 
     # Only HWC RGB/RGBA images get color transform and return HWC format
     # CHW images preserve their original format

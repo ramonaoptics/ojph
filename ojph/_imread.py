@@ -4,7 +4,7 @@ from .ojph_bindings import J2CInfile, MemInfile, Codestream
 from warnings import warn
 
 # Copy the imageio.v3.imread signature
-def imread(uri, *, index=None, plugin=None, extension=None, format_hint=None, **kwargs):
+def imread(uri, *, index=None, plugin=None, extension=None, format_hint=None, channel_order=None, **kwargs):
     if index is not None:
         warn(f"index {index} is ignored", stacklevel=2)
     if plugin is not None:
@@ -14,10 +14,10 @@ def imread(uri, *, index=None, plugin=None, extension=None, format_hint=None, **
     if format_hint is not None:
         warn(f"format_hint {format_hint} is ignored", stacklevel=2)
 
-    return OJPHImageFile(uri).read_image()
+    return OJPHImageFile(uri, channel_order=channel_order).read_image()
 
 
-def imread_from_memory(data):
+def imread_from_memory(data, *, channel_order=None):
     """
     Read a JPEG2000 image from memory data.
 
@@ -41,11 +41,11 @@ def imread_from_memory(data):
 
     mem_infile = MemInfile()
     mem_infile.open(data)
-    return OJPHImageFile(mem_infile).read_image()
+    return OJPHImageFile(mem_infile, channel_order=channel_order).read_image()
 
 
 class OJPHImageFile:
-    def __init__(self, filename, *, mode='r'):
+    def __init__(self, filename, *, mode='r', channel_order=None):
         if mode != 'r':
             raise ValueError(f"We only support mode = 'r' for now. Got {mode}.")
         self._codestream = None
@@ -74,6 +74,7 @@ class OJPHImageFile:
 
         self._is_planar = self._codestream.is_planar()
         self._num_components = num_components
+        self._channel_order = channel_order
 
         bit_depth = siz.get_bit_depth(0)
         is_signed = siz.is_signed(0)
@@ -174,6 +175,8 @@ class OJPHImageFile:
         width = siz.get_recon_width(0)
         self._codestream.create()
 
+        print(f"is_planar: {self._is_planar}")
+        print(f"num_components: {self._num_components}")
         if self._num_components == 1:
             # Single component - always HW format
             image = np.zeros((height, width), dtype=self._dtype)
@@ -187,11 +190,27 @@ class OJPHImageFile:
                 )
                 image[h] = line_array
         else:
-            # Multi-component - optimize for RGB images using color transform detection
-            is_rgb = self._codestream.access_cod().is_using_color_transform()
+            if self._channel_order is None:
+                if self._codestream.access_cod().is_using_color_transform():
+                    self._channel_order = 'HWC'
+                else:
+                    self._channel_order = 'HWC' if self._is_planar else 'CHW'
+            # Non-RGB multi-component - use planar flag for format detection
+            if self._channel_order == 'CHW':
+                # Planar mode was used for writing - return CHW format
+                image = np.zeros((self._num_components, height, width), dtype=self._dtype)
 
-            if is_rgb:
-                # RGB image - always return HWC format for optimal compatibility
+                for c in range(self._num_components):
+                    for h in range(height):
+                        line = self._codestream.pull(c)
+                        i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+                        line_array = np.ctypeslib.as_array(
+                            ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
+                            shape=(line.size,)
+                        )
+                        image[c, h, :] = line_array
+            else:
+                # Non-planar mode was used for writing - return HWC format
                 image = np.zeros((height, width, self._num_components), dtype=self._dtype)
 
                 for c in range(self._num_components):
@@ -203,34 +222,6 @@ class OJPHImageFile:
                             shape=(line.size,)
                         )
                         image[h, :, c] = line_array
-            else:
-                # Non-RGB multi-component - use planar flag for format detection
-                if self._is_planar:
-                    # Planar mode was used for writing - return CHW format
-                    image = np.zeros((self._num_components, height, width), dtype=self._dtype)
-
-                    for c in range(self._num_components):
-                        for h in range(height):
-                            line = self._codestream.pull(c)
-                            i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
-                            line_array = np.ctypeslib.as_array(
-                                ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                                shape=(line.size,)
-                            )
-                            image[c, h, :] = line_array
-                else:
-                    # Non-planar mode was used for writing - return HWC format
-                    image = np.zeros((height, width, self._num_components), dtype=self._dtype)
-
-                    for c in range(self._num_components):
-                        for h in range(height):
-                            line = self._codestream.pull(c)
-                            i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
-                            line_array = np.ctypeslib.as_array(
-                                ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                                shape=(line.size,)
-                            )
-                            image[h, :, c] = line_array
 
         self._close_codestream_and_file()
         return image
