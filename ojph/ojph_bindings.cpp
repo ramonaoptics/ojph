@@ -2,6 +2,9 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdio>
 
 #include <openjph/ojph_file.h>
 #include <openjph/ojph_codestream.h>
@@ -10,6 +13,137 @@
 
 namespace py = pybind11;
 using namespace ojph;
+
+class j2c_infile_with_flags : public infile_base {
+public:
+    j2c_infile_with_flags() : fh(nullptr) {}
+    ~j2c_infile_with_flags() override { close(); }
+
+    void open(const char* filename, int flags = 0) {
+        if (fh != nullptr) {
+            close();
+        }
+        if (flags == 0) {
+            fh = fopen(filename, "rb");
+            if (fh == nullptr) {
+                throw std::runtime_error("Failed to open file");
+            }
+        } else {
+            int fd = ::open(filename, flags | O_RDONLY);
+            if (fd < 0) {
+                throw std::runtime_error("Failed to open file with specified flags");
+            }
+            fh = fdopen(fd, "rb");
+            if (fh == nullptr) {
+                ::close(fd);
+                throw std::runtime_error("Failed to convert file descriptor to FILE*");
+            }
+        }
+    }
+
+    size_t read(void *ptr, size_t size) override {
+        if (fh == nullptr) {
+            throw std::runtime_error("File not open");
+        }
+        return fread(ptr, 1, size, fh);
+    }
+
+    int seek(si64 offset, enum infile_base::seek origin) override {
+        if (fh == nullptr) {
+            throw std::runtime_error("File not open");
+        }
+        return ojph_fseek(fh, offset, origin);
+    }
+
+    si64 tell() override {
+        if (fh == nullptr) {
+            throw std::runtime_error("File not open");
+        }
+        return ojph_ftell(fh);
+    }
+
+    bool eof() override {
+        if (fh == nullptr) {
+            return true;
+        }
+        return feof(fh) != 0;
+    }
+
+    void close() override {
+        if (fh != nullptr) {
+            fclose(fh);
+            fh = nullptr;
+        }
+    }
+
+private:
+    FILE* fh;
+};
+
+class j2c_outfile_with_flags : public outfile_base {
+public:
+    j2c_outfile_with_flags() : fh(nullptr) {}
+    ~j2c_outfile_with_flags() override { close(); }
+
+    void open(const char* filename, int flags = 0) {
+        if (fh != nullptr) {
+            close();
+        }
+        if (flags == 0) {
+            fh = fopen(filename, "wb");
+            if (fh == nullptr) {
+                throw std::runtime_error("Failed to open file");
+            }
+        } else {
+            int fd = ::open(filename, flags | O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd < 0) {
+                throw std::runtime_error("Failed to open file with specified flags");
+            }
+            fh = fdopen(fd, "wb");
+            if (fh == nullptr) {
+                ::close(fd);
+                throw std::runtime_error("Failed to convert file descriptor to FILE*");
+            }
+        }
+    }
+
+    size_t write(const void *ptr, size_t size) override {
+        if (fh == nullptr) {
+            throw std::runtime_error("File not open");
+        }
+        return fwrite(ptr, 1, size, fh);
+    }
+
+    si64 tell() override {
+        if (fh == nullptr) {
+            throw std::runtime_error("File not open");
+        }
+        return ojph_ftell(fh);
+    }
+
+    void flush() override {
+        if (fh != nullptr) {
+            fflush(fh);
+        }
+    }
+
+    void close() override {
+        if (fh != nullptr) {
+            fclose(fh);
+            fh = nullptr;
+        }
+    }
+
+    int seek(si64 offset, enum outfile_base::seek origin) override {
+        if (fh == nullptr) {
+            throw std::runtime_error("File not open");
+        }
+        return ojph_fseek(fh, offset, origin);
+    }
+
+private:
+    FILE* fh;
+};
 
 PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<infile_base>(m, "InfileBase")
@@ -29,6 +163,17 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("tell", &j2c_infile::tell)
         .def("eof", &j2c_infile::eof)
         .def("close", &j2c_infile::close);
+
+    py::class_<j2c_infile_with_flags, infile_base>(m, "J2CInfileWithFlags")
+        .def(py::init<>())
+        .def("open", &j2c_infile_with_flags::open, py::arg("filename"), py::arg("flags") = 0)
+        .def("read", &j2c_infile_with_flags::read)
+        .def("seek", [](infile_base& self, si64 offset, int origin) {
+            return self.seek(offset, static_cast<enum infile_base::seek>(origin));
+        })
+        .def("tell", &j2c_infile_with_flags::tell)
+        .def("eof", &j2c_infile_with_flags::eof)
+        .def("close", &j2c_infile_with_flags::close);
 
     py::class_<mem_infile, infile_base>(m, "MemInfile")
         .def(py::init<>())
@@ -72,6 +217,17 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("write", &j2c_outfile::write)
         .def("tell", &j2c_outfile::tell)
         .def("close", &j2c_outfile::close);
+
+    py::class_<j2c_outfile_with_flags, outfile_base>(m, "J2COutfileWithFlags")
+        .def(py::init<>())
+        .def("open", &j2c_outfile_with_flags::open, py::arg("filename"), py::arg("flags") = 0)
+        .def("write", &j2c_outfile_with_flags::write)
+        .def("tell", &j2c_outfile_with_flags::tell)
+        .def("flush", &j2c_outfile_with_flags::flush)
+        .def("seek", [](outfile_base& self, si64 offset, int origin) {
+            return self.seek(offset, static_cast<enum outfile_base::seek>(origin));
+        })
+        .def("close", &j2c_outfile_with_flags::close);
 
     py::class_<mem_outfile, outfile_base>(m, "MemOutfile")
         .def(py::init<>())

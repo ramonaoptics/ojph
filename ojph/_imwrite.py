@@ -3,7 +3,7 @@ import ctypes
 import inspect
 from collections.abc import Buffer
 
-from .ojph_bindings import Codestream, J2COutfile, MemOutfile, Point
+from .ojph_bindings import Codestream, J2COutfileWithFlags, MemOutfile, Point
 
 
 class CompressedData(Buffer):
@@ -38,7 +38,7 @@ def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None):
     return np.asarray(CompressedData(mem_outfile, codestream))
 
 
-def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompositions=None):
+def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompositions=None, flags=None):
     # Auto-detect channel order if not provided
     if channel_order is None:
         if image.ndim == 2:
@@ -65,8 +65,9 @@ def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompo
     if isinstance(filename, MemOutfile):
         ojph_file = filename
     else:
-        ojph_file = J2COutfile()
-        ojph_file.open(str(filename))
+        ojph_file = J2COutfileWithFlags()
+        file_flags = flags if flags is not None else 0
+        ojph_file.open(str(filename), file_flags)
 
     close_codestream = codestream is None
     if codestream is None:

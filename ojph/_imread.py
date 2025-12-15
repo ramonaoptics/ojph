@@ -2,7 +2,7 @@ import numpy as np
 import ctypes
 from warnings import warn
 
-from .ojph_bindings import J2CInfile, MemInfile, Codestream
+from .ojph_bindings import J2CInfileWithFlags, MemInfile, Codestream
 
 def imread(
     uri,
@@ -16,6 +16,7 @@ def imread(
     level=0,
     skipped_res_for_data=None,
     skipped_res_for_recon=None,
+    flags=None,
     **kwargs,
 ):
     if index is not None:
@@ -27,7 +28,7 @@ def imread(
     if format_hint is not None:
         warn(f"format_hint {format_hint} is ignored", stacklevel=2)
 
-    return OJPHImageFile(uri, channel_order=channel_order, offset=None).read_image(
+    return OJPHImageFile(uri, channel_order=channel_order, offset=None, flags=flags).read_image(
         level=level,
         skipped_res_for_data=skipped_res_for_data,
         skipped_res_for_recon=skipped_res_for_recon,
@@ -71,7 +72,7 @@ def imread_from_memory(data, *, channel_order=None, level=0, skipped_res_for_dat
 
 
 class OJPHImageFile:
-    def __init__(self, filename, *, mode='r', channel_order=None, offset=None):
+    def __init__(self, filename, *, mode='r', channel_order=None, offset=None, flags=None):
         if mode != 'r':
             raise ValueError(f"We only support mode = 'r' for now. Got {mode}.")
         self._codestream = None
@@ -82,8 +83,9 @@ class OJPHImageFile:
             self._ojph_file = filename
             self._is_mem_file = True
         else:
-            ojph_file = J2CInfile()
-            ojph_file.open(str(filename))
+            ojph_file = J2CInfileWithFlags()
+            file_flags = flags if flags is not None else 0
+            ojph_file.open(str(filename), file_flags)
             if offset is not None:
                 ojph_file.seek(offset, 0)
             self._ojph_file = ojph_file
@@ -216,9 +218,10 @@ class OJPHImageFile:
     def levels(self):
         return self._num_decompositions
 
-    def _open_file(self):
-        self._ojph_file = J2CInfile()
-        self._ojph_file.open(self._filename)
+    def _open_file(self, flags=None):
+        self._ojph_file = J2CInfileWithFlags()
+        file_flags = flags if flags is not None else 0
+        self._ojph_file.open(self._filename, file_flags)
         self._codestream = Codestream()
         self._codestream.read_headers(self._ojph_file)
 
