@@ -61,9 +61,9 @@ def test_imwrite_to_memory_channel_order(tmp_path):
     assert len(compressed_data_chw) > 0
 
     # Convert to bytes and verify they can be read back
-    for compressed_data, test_image, is_chw in [
-        (compressed_data_hwc, test_image_hwc, False),
-        (compressed_data_chw, test_image_chw, True)
+    for compressed_data, test_image, channel_order in [
+        (compressed_data_hwc, test_image_hwc, "HWC"),
+        (compressed_data_chw, test_image_chw, "CHW")
     ]:
         compressed_bytes = compressed_data.tobytes()
 
@@ -71,7 +71,7 @@ def test_imwrite_to_memory_channel_order(tmp_path):
         with open(filename, 'wb') as f:
             f.write(compressed_bytes)
 
-        loaded_image = imread(filename)
+        loaded_image = imread(filename, channel_order=channel_order)
         np.testing.assert_array_equal(loaded_image, test_image)
 
 
