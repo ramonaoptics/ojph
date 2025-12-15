@@ -34,7 +34,15 @@ def imread(
     )
 
 
-def imread_from_memory(data, *, channel_order=None, level=0, skipped_res_for_data=None, skipped_res_for_recon=None):
+def imread_from_memory(
+    data,
+    *,
+    channel_order=None,
+    level=0,
+    skipped_res_for_data=None,
+    skipped_res_for_recon=None,
+    out=None,
+):
     """Read a JPEG2000 image from memory data.
 
     Parameters
@@ -67,6 +75,7 @@ def imread_from_memory(data, *, channel_order=None, level=0, skipped_res_for_dat
         level=level,
         skipped_res_for_data=skipped_res_for_data,
         skipped_res_for_recon=skipped_res_for_recon,
+        out=out,
     )
 
 
