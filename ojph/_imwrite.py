@@ -30,15 +30,24 @@ class CompressedData(Buffer):
         return self._memoryview
 
 
-def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None, reversible=None, qstep=None):
+def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None, reversible=None, qstep=None, progression_order=None):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
     codestream = Codestream()
-    imwrite(mem_outfile, image, channel_order=channel_order, codestream=codestream, num_decompositions=num_decompositions, reversible=reversible, qstep=qstep)
+    imwrite(
+        mem_outfile,
+        image,
+        channel_order=channel_order,
+        codestream=codestream,
+        num_decompositions=num_decompositions,
+        reversible=reversible,
+        qstep=qstep,
+        progression_order=progression_order,
+    )
     return np.asarray(CompressedData(mem_outfile, codestream))
 
 
-def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompositions=None, reversible=None, qstep=None):
+def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompositions=None, reversible=None, qstep=None, progression_order=None):
     # Auto-detect channel order if not provided
     if channel_order is None:
         if image.ndim == 2:
@@ -93,6 +102,17 @@ def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompo
             is_signed,
         )
     cod = codestream.access_cod()
+    if progression_order is None:
+        progression_order = "RLCP"
+
+    progression_order = progression_order.upper()
+    valid_progressions = {"LRCP", "RLCP", "RPCL", "PCRL", "CPRL"}
+    if progression_order not in valid_progressions:
+        raise ValueError(
+            f"Invalid progression_order '{progression_order}'. "
+            f"Must be one of: {', '.join(sorted(valid_progressions))}"
+        )
+    cod.set_progression_order(progression_order)
     if reversible is None:
         reversible = True
     cod.set_reversible(reversible)

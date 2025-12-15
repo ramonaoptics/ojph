@@ -101,6 +101,7 @@ class OJPHImageFile:
 
         cod = self._codestream.access_cod()
         self._num_decompositions = cod.get_num_decompositions()
+        self._progression_order = cod.get_progression_order_as_string()
 
         if self._channel_order is None:
             if cod.is_using_color_transform():
@@ -171,6 +172,7 @@ class OJPHImageFile:
 
         cod = instance._codestream.access_cod()
         instance._num_decompositions = cod.get_num_decompositions()
+        instance._progression_order = cod.get_progression_order_as_string()
 
         if instance._channel_order is None:
             if cod.is_using_color_transform():
@@ -215,6 +217,10 @@ class OJPHImageFile:
     @property
     def levels(self):
         return self._num_decompositions
+
+    @property
+    def progression_order(self):
+        return self._progression_order
 
     def _open_file(self):
         self._ojph_file = J2CInfile()
