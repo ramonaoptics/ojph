@@ -30,15 +30,15 @@ class CompressedData(Buffer):
         return self._memoryview
 
 
-def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None):
+def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None, reversible=None, qstep=None):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
     codestream = Codestream()
-    imwrite(mem_outfile, image, channel_order=channel_order, codestream=codestream, num_decompositions=num_decompositions)
+    imwrite(mem_outfile, image, channel_order=channel_order, codestream=codestream, num_decompositions=num_decompositions, reversible=reversible, qstep=qstep)
     return np.asarray(CompressedData(mem_outfile, codestream))
 
 
-def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompositions=None, flags=None):
+def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompositions=None, flags=None, reversible=None, qstep=None):
     # Auto-detect channel order if not provided
     if channel_order is None:
         if image.ndim == 2:
@@ -94,10 +94,14 @@ def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompo
             is_signed,
         )
     cod = codestream.access_cod()
-    cod.set_reversible(True)
+    if reversible is None:
+        reversible = True
+    cod.set_reversible(reversible)
     cod.set_color_transform(False)
     if num_decompositions is not None:
         cod.set_num_decomposition(num_decompositions)
+    if not reversible and qstep is not None:
+        codestream.access_qcd().set_irrev_quant(qstep)
     codestream.set_planar(num_components > 1)
 
     codestream.write_headers(ojph_file, None, 0)
