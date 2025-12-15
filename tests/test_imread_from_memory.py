@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from ojph._imwrite import imwrite_to_memory
-from ojph._imread import imread_from_memory
+from ojph._imread import imread_from_memory, OJPHImageFile
 
 
 def test_imread_from_memory():
@@ -70,3 +70,43 @@ def test_imread_from_memory_invalid_input():
 
     with pytest.raises(ValueError):
         imread_from_memory("not valid data")  # Invalid data type
+
+
+def test_read_image_out_preallocated_exact_shape():
+    test_image = np.random.randint(0, 256, (64, 64), dtype=np.uint8)
+    compressed_data = imwrite_to_memory(test_image)
+
+    reader = OJPHImageFile.from_memory(compressed_data)
+    out = np.empty(reader.shape, dtype=reader.dtype)
+
+    decoded = reader.read_image(out=out)
+
+    assert decoded.shape == test_image.shape
+    assert decoded.dtype == test_image.dtype
+    np.testing.assert_array_equal(decoded, test_image)
+    assert np.shares_memory(decoded, out)
+
+
+def test_read_image_out_flat_array_view():
+    test_image = np.random.randint(0, 256, (32, 48, 3), dtype=np.uint8)
+    compressed_data = imwrite_to_memory(test_image, channel_order="HWC")
+
+    reader = OJPHImageFile.from_memory(compressed_data, channel_order="HWC")
+    flat_out = np.empty(np.prod(reader.shape), dtype=reader.dtype)
+
+    decoded = reader.read_image(out=flat_out)
+
+    assert decoded.shape == test_image.shape
+    np.testing.assert_array_equal(decoded, test_image)
+    assert np.shares_memory(decoded, flat_out)
+
+
+def test_read_image_out_wrong_dtype_raises():
+    test_image = np.random.randint(0, 256, (16, 16), dtype=np.uint8)
+    compressed_data = imwrite_to_memory(test_image)
+
+    reader = OJPHImageFile.from_memory(compressed_data)
+    out = np.empty(reader.shape, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="dtype mismatch"):
+        reader.read_image(out=out)
