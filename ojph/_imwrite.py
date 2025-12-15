@@ -30,15 +30,15 @@ class CompressedData(Buffer):
         return self._memoryview
 
 
-def imwrite_to_memory(image, *, channel_order=None):
+def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
     codestream = Codestream()
-    imwrite(mem_outfile, image, channel_order=channel_order, codestream=codestream)
+    imwrite(mem_outfile, image, channel_order=channel_order, codestream=codestream, num_decompositions=num_decompositions)
     return np.asarray(CompressedData(mem_outfile, codestream))
 
 
-def imwrite(filename, image, *, channel_order=None, codestream=None):
+def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompositions=None):
     # Auto-detect channel order if not provided
     if channel_order is None:
         if image.ndim == 2:
@@ -64,11 +64,9 @@ def imwrite(filename, image, *, channel_order=None, codestream=None):
 
     if isinstance(filename, MemOutfile):
         ojph_file = filename
-        is_mem_file = True
     else:
         ojph_file = J2COutfile()
         ojph_file.open(str(filename))
-        is_mem_file = False
 
     close_codestream = codestream is None
     if codestream is None:
@@ -97,6 +95,8 @@ def imwrite(filename, image, *, channel_order=None, codestream=None):
     cod = codestream.access_cod()
     cod.set_reversible(True)
     cod.set_color_transform(False)
+    if num_decompositions is not None:
+        cod.set_num_decomposition(num_decompositions)
     codestream.set_planar(num_components > 1)
 
     codestream.write_headers(ojph_file, None, 0)

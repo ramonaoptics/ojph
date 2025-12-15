@@ -232,3 +232,24 @@ def test_channel_order_validation(tmp_path):
     data_2d = np.random.randint(0, 256, (100, 150), dtype=np.uint8)
     with pytest.raises(ValueError, match="must be consistent"):
         imwrite(filename, data_2d, channel_order='HWC')
+
+
+@pytest.mark.parametrize(
+    'num_decompositions', [None, 3, 5, 7]
+)
+def test_num_decompositions(num_decompositions, tmp_path):
+    from ojph.ojph_bindings import J2CInfile, Codestream
+
+    filename = tmp_path / 'test.jp2'
+    data = np.random.randint(0, 256, (512, 512), dtype=np.uint8)
+
+    imwrite(filename, data, num_decompositions=num_decompositions)
+
+    if num_decompositions is None:
+        num_decompositions = 5
+    for level in range(num_decompositions):
+        imread(filename, level=level)
+
+    from ojph._imread import OJPHImageFile
+    f = OJPHImageFile(filename)
+    assert f.levels == num_decompositions
