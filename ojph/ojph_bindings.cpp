@@ -186,6 +186,10 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("packets_use_eph", &param_cod::packets_use_eph)
         .def("get_block_vertical_causality", &param_cod::get_block_vertical_causality);
 
+    py::class_<param_qcd>(m, "ParamQcd")
+        .def("set_irrev_quant", static_cast<void (param_qcd::*)(float)>(&param_qcd::set_irrev_quant), py::arg("delta"))
+        .def("set_irrev_quant", static_cast<void (param_qcd::*)(ui32, float)>(&param_qcd::set_irrev_quant), py::arg("comp_idx"), py::arg("delta"));
+
     py::class_<line_buf, std::unique_ptr<line_buf, py::nodelete>>(m, "LineBuf")
         .def(py::init<>())
 

@@ -5,6 +5,11 @@ import os
 from ojph import imwrite_to_memory, imread
 
 
+def _mse(a, b):
+    diff = a.astype(np.float32) - b.astype(np.float32)
+    return float(np.mean(diff * diff))
+
+
 def test_imwrite_to_memory_grayscale(tmp_path):
     test_image = np.random.randint(0, 256, (100, 150), dtype=np.uint8)
 
@@ -108,3 +113,36 @@ def test_imwrite_to_memory_consistency():
         np.asarray(compressed_data_1),
         np.asarray(compressed_data_2)
     )
+
+
+def test_lossless_vs_lossy_memory_error_increase(tmp_path):
+    rng = np.random.default_rng(321)
+    test_image = rng.integers(0, 256, (256, 256), dtype=np.uint8)
+
+    lossless_data = imwrite_to_memory(test_image, reversible=True)
+    lossless_bytes = lossless_data.tobytes()
+    lossless_filename = tmp_path / 'lossless.j2c'
+    with open(lossless_filename, 'wb') as f:
+        f.write(lossless_bytes)
+    lossless = imread(lossless_filename)
+    np.testing.assert_array_equal(lossless, test_image)
+
+    low_qstep_data = imwrite_to_memory(test_image, reversible=False, qstep=0.002)
+    low_qstep_bytes = low_qstep_data.tobytes()
+    low_qstep_filename = tmp_path / 'lossy_low.j2c'
+    with open(low_qstep_filename, 'wb') as f:
+        f.write(low_qstep_bytes)
+    low_qstep = imread(low_qstep_filename)
+
+    high_qstep_data = imwrite_to_memory(test_image, reversible=False, qstep=0.01)
+    high_qstep_bytes = high_qstep_data.tobytes()
+    high_qstep_filename = tmp_path / 'lossy_high.j2c'
+    with open(high_qstep_filename, 'wb') as f:
+        f.write(high_qstep_bytes)
+    high_qstep = imread(high_qstep_filename)
+
+    mse_low = _mse(test_image, low_qstep)
+    mse_high = _mse(test_image, high_qstep)
+
+    assert mse_low > 0.0
+    assert mse_high > mse_low

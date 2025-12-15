@@ -3,6 +3,11 @@ import numpy as np
 import pytest
 
 
+def _mse(a, b):
+    diff = a.astype(np.float32) - b.astype(np.float32)
+    return float(np.mean(diff * diff))
+
+
 @pytest.mark.parametrize(
     'shape', [
         (200, 100),
@@ -253,3 +258,27 @@ def test_num_decompositions(num_decompositions, tmp_path):
     from ojph._imread import OJPHImageFile
     f = OJPHImageFile(filename)
     assert f.levels == num_decompositions
+
+
+def test_lossless_vs_lossy_error_increase(tmp_path):
+    rng = np.random.default_rng(123)
+    data = rng.integers(0, 256, (256, 256), dtype=np.uint8)
+
+    lossless_filename = tmp_path / 'lossless.jp2'
+    imwrite(lossless_filename, data, reversible=True)
+    lossless = imread(lossless_filename)
+    np.testing.assert_array_equal(data, lossless)
+
+    low_qstep_filename = tmp_path / 'lossy_low.jp2'
+    imwrite(low_qstep_filename, data, reversible=False, qstep=0.002)
+    low_qstep = imread(low_qstep_filename)
+
+    high_qstep_filename = tmp_path / 'lossy_high.jp2'
+    imwrite(high_qstep_filename, data, reversible=False, qstep=0.01)
+    high_qstep = imread(high_qstep_filename)
+
+    mse_low = _mse(data, low_qstep)
+    mse_high = _mse(data, high_qstep)
+
+    assert mse_low > 0.0
+    assert mse_high > mse_low
