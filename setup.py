@@ -72,13 +72,7 @@ setup(
     python_requires='>=3.12',
     install_requires=[
         'numpy>=1.24.0',
-        'click>=8.0',
     ],
-    entry_points={
-        'console_scripts': [
-            'ojph_dump=ojph.cli.dump:main',
-        ],
-    },
     license_files=('LICENSE.txt',),
     ext_modules=[ojph_module],
     include_package_data=True,
