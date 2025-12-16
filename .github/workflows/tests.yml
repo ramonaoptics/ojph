@@ -55,31 +55,41 @@ jobs:
           python-version: ${{ matrix.python-version }}
           miniforge-variant: Miniforge3
 
-      - name: Install and Test Package (Unix)
+      - name: Install Dependencies (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash -el {0}
         run: |
           conda info
           conda list
-          conda install compilers pybind11 numpy openjph setuptools pytest --yes
+          conda install --quiet compilers pybind11 numpy openjph setuptools pytest --yes
           export OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
-          python -m pip install -e . -vvv --no-deps --no-build-isolation
+          python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
+
+      - name: Test Package (Unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash -el {0}
+        run: |
           pip check
           python -c "import ojph; print(ojph.__version__)"
           pytest
 
-      - name: Install and Test Package (Windows)
+      - name: Install Dependencies (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           conda info
           conda list
-          conda install --yes compilers pybind11 numpy openjph setuptools pytest git
+          conda install --yes --quiet compilers pybind11 numpy openjph setuptools pytest git
           set "OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}"
           setx OJPH_GIT_DESCRIBE ${{ steps.ghd.outputs.describe }}
-          python -m pip install -e . -vvv --no-deps --no-build-isolation
+          python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
+
+      - name: Test Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
           pip check
           python -c "import ojph; print(ojph.__version__)"
           pytest
