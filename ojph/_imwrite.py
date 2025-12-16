@@ -124,10 +124,9 @@ def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompo
     codestream.set_planar(num_components > 1)
 
     codestream.write_headers(ojph_file, None, 0)
-    c = 0
-    line = codestream.exchange(None, c)
 
-    if num_components == 1:
+    line = codestream.exchange(None, 0)
+    if channel_order == "HW":
         # Single component - simple case
         for i in range(height):
             i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
@@ -137,30 +136,29 @@ def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompo
             )
             line_array[...] = image[i, :]
             line = codestream.exchange(line, 0)
-    else:
+    elif channel_order == 'HWC':
         # Multi-component - use planar mode for efficiency
-        if channel_order == 'HWC':
-            # HWC format: image[height, width, channel]
-            for c in range(num_components):
-                for i in range(height):
-                    i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
-                    line_array = np.ctypeslib.as_array(
-                        ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                        shape=(line.size,)
-                    )
-                    line_array[...] = image[i, :, c]
-                    line = codestream.exchange(line, c)
-        elif channel_order == 'CHW':
-            # CHW format: image[channel, height, width]
-            for c in range(num_components):
-                for i in range(height):
-                    i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
-                    line_array = np.ctypeslib.as_array(
-                        ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                        shape=(line.size,)
-                    )
-                    line_array[...] = image[c, i, :]
-                    line = codestream.exchange(line, c)
+        # HWC format: image[height, width, channel]
+        for c in range(num_components):
+            for i in range(height):
+                i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+                line_array = np.ctypeslib.as_array(
+                    ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
+                    shape=(line.size,)
+                )
+                line_array[...] = image[i, :, c]
+                line = codestream.exchange(line, c)
+    elif channel_order == 'CHW':
+        # CHW format: image[channel, height, width]
+        for c in range(num_components):
+            for i in range(height):
+                i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
+                line_array = np.ctypeslib.as_array(
+                    ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
+                    shape=(line.size,)
+                )
+                line_array[...] = image[c, i, :]
+                line = codestream.exchange(line, c)
 
     codestream.flush()
     if close_codestream:
