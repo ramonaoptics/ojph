@@ -110,3 +110,29 @@ def test_read_image_out_wrong_dtype_raises():
 
     with pytest.raises(ValueError, match="dtype mismatch"):
         reader.read_image(out=out)
+
+
+def test_imread_from_memory_non_reversible_no_negative_values():
+    # This test will trigger overflow during the decoding process
+    # since the reconstruction isn't exact
+    base_value = 240
+    noise_range = 15
+    size = 128
+    test_image = np.full((size, size), base_value, dtype=np.uint8)
+    noise = np.random.randint(-noise_range, noise_range + 1, size=(size, size), dtype=np.int16)
+    test_image = np.clip(test_image.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+
+    compressed_data = imwrite_to_memory(
+        test_image,
+        reversible=False,
+        qstep=0.005
+    )
+    decoded_image = imread_from_memory(compressed_data)
+
+    assert decoded_image.shape == test_image.shape
+    assert decoded_image.dtype == test_image.dtype
+    assert np.all(decoded_image >= 50), (
+        f"Found values below 50 in decoded image. "
+        f"Min value: {decoded_image.min()}, "
+        f"Values below 50: {np.sum(decoded_image < 50)}"
+    )

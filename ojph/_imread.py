@@ -293,41 +293,52 @@ class OJPHImageFile:
             image = out.view()
             image.shape = shape
 
+
+        if self._dtype in [np.uint32, np.int32]:
+            min_val = None
+            max_val = None
+        else:
+            iinfo = np.iinfo(self._dtype)
+            min_val = iinfo.min
+            max_val = iinfo.max
+
         if self._num_components == 1:
             # Single component - always HW format
             for h in range(height):
-                line = self._codestream.pull(0)
-                i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
-                line_array = np.ctypeslib.as_array(
-                    ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                    shape=(line.size,)
-                )
-                image[h] = line_array
+                self._codestream_pull(0, out=image[h], min_val=min_val, max_val=max_val)
         elif self._channel_order == 'CHW':
             # Non-RGB multi-component - use planar flag for format detection
             for c in range(self._num_components):
                 for h in range(height):
-                    line = self._codestream.pull(c)
-                    i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
-                    line_array = np.ctypeslib.as_array(
-                        ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                        shape=(line.size,)
-                    )
-                    image[c, h, :] = line_array
+                    self._codestream_pull(c, out=image[c, h, :], min_val=min_val, max_val=max_val)
         else:
             # Non-planar mode was used for writing - return HWC format
             for c in range(self._num_components):
                 for h in range(height):
-                    line = self._codestream.pull(c)
-                    i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_uint32))
-                    line_array = np.ctypeslib.as_array(
-                        ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_uint32)),
-                        shape=(line.size,)
-                    )
-                    image[h, :, c] = line_array
+                    self._codestream_pull(c, out=image[h, :, c], min_val=min_val, max_val=max_val)
 
         self._close_codestream_and_file()
         return image
+
+    def _codestream_pull(self, component, out, min_val=None, max_val=None):
+        line = self._codestream.pull(component)
+        i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_int32))
+        line_array = np.ctypeslib.as_array(
+            ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_int32)),
+            shape=(line.size,)
+        )
+
+        # Aassume min_val is not None if max_val is not None
+        if max_val is not None:
+            line_array = np.clip(
+                line_array,
+                min_val,
+                max_val,
+                out=out,
+                casting='unsafe',
+            )
+        else:
+            out[:] = line_array
 
     def _close_codestream_and_file(self):
         if self._codestream is not None:
