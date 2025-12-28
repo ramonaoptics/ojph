@@ -47,7 +47,18 @@ def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None, rev
     return np.asarray(CompressedData(mem_outfile, codestream))
 
 
-def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompositions=None, reversible=None, qstep=None, progression_order=None):
+def imwrite(
+    filename,
+    image,
+    *,
+    channel_order=None,
+    codestream=None,
+    num_decompositions=None,
+    reversible=None,
+    qstep=None,
+    progression_order=None,
+    tlm_marker=True,
+):
     # Auto-detect channel order if not provided
     if channel_order is None:
         if image.ndim == 2:
@@ -122,6 +133,7 @@ def imwrite(filename, image, *, channel_order=None, codestream=None, num_decompo
     if not reversible and qstep is not None:
         codestream.access_qcd().set_irrev_quant(qstep)
     codestream.set_planar(num_components > 1)
+    codestream.request_tlm_marker(tlm_marker)
 
     codestream.write_headers(ojph_file, None, 0)
 
