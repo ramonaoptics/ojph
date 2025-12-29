@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add `tlm_marker` in JPEG2000 codestream by default. A new option `tlm_marker` is 
   added to `imwrite` to control this behavior.
+- Add options for `tileparts_at_resolutions` and `tileparts_at_components`. By default
+  `tileparts_at_resolutions` is set to True for writing files.
 
 ## [0.4.4] - 2025-12-15
 

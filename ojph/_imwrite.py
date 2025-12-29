@@ -58,6 +58,8 @@ def imwrite(
     qstep=None,
     progression_order=None,
     tlm_marker=True,
+    tileparts_at_resolutions=True,
+    tileparts_at_components=False,
 ):
     # Auto-detect channel order if not provided
     if channel_order is None:
@@ -133,6 +135,8 @@ def imwrite(
     if not reversible and qstep is not None:
         codestream.access_qcd().set_irrev_quant(qstep)
     codestream.set_planar(num_components > 1)
+    # Set tile parts for resolution, but not for channels
+    codestream.set_tilepart_divisions(True, False)
     codestream.request_tlm_marker(tlm_marker)
 
     codestream.write_headers(ojph_file, None, 0)
