@@ -30,7 +30,18 @@ class CompressedData(Buffer):
         return self._memoryview
 
 
-def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None, reversible=None, qstep=None, progression_order=None):
+def imwrite_to_memory(
+    image,
+    *,
+    channel_order=None,
+    num_decompositions=None,
+    reversible=None,
+    qstep=None,
+    progression_order=None,
+    tlm_marker=True,
+    tileparts_at_resolutions=True,
+    tileparts_at_components=False,
+):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
     codestream = Codestream()
@@ -43,6 +54,9 @@ def imwrite_to_memory(image, *, channel_order=None, num_decompositions=None, rev
         reversible=reversible,
         qstep=qstep,
         progression_order=progression_order,
+        tlm_marker=tlm_marker,
+        tileparts_at_resolutions=tileparts_at_resolutions,
+        tileparts_at_components=tileparts_at_components,
     )
     return np.asarray(CompressedData(mem_outfile, codestream))
 
