@@ -166,7 +166,7 @@ class OJPHImageFile:
         ojph_file = MemInfile()
         ojph_file.open(data)
         if offset is not None:
-            ojph_file.seek
+            ojph_file.seek(offset, 0)
         instance._ojph_file = ojph_file
         instance._codestream = Codestream()
         instance._codestream.read_headers(ojph_file)

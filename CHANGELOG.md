@@ -5,9 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2025-12-29
+
+- Fix reading from memory files when the offset parameter is provided.
+- Fix the fact that `tlm_marker`, `tileparts_at_resolutions`,
+  `tileparts_at_components` arguments were not exposed to
+  `imwrite_to_memory`.
+
 ## [0.4.5] - 2025-12-28
 
-- Add `tlm_marker` in JPEG2000 codestream by default. A new option `tlm_marker` is 
+- Add `tlm_marker` in JPEG2000 codestream by default. A new option `tlm_marker` is
   added to `imwrite` to control this behavior.
 - Add options for `tileparts_at_resolutions` and `tileparts_at_components`. By default
   `tileparts_at_resolutions` is set to True for writing files.
