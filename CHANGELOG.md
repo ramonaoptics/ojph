@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-12-29
+
+- Optimize image reading and writing for multi-threaded workloads by releasing the
+  GIL for entire operations instead of per-line. All tight loops (component and line
+  iterations) are now executed in C++ with the GIL released, significantly improving
+  performance in multi-threaded scenarios. Single-threaded performance is also improved
+  due to reduced Python overhead and better cache locality.
+- Remove temporary buffer allocations during image reading by writing directly to
+  the output array with clipping and dtype conversion handled in C++.
+
 ## [0.4.6] - 2025-12-29
 
 - Fix reading from memory files when the offset parameter is provided.

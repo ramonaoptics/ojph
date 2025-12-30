@@ -1,5 +1,4 @@
 import numpy as np
-import ctypes
 from warnings import warn
 
 from .ojph_bindings import J2CInfile, MemInfile, Codestream
@@ -302,43 +301,10 @@ class OJPHImageFile:
             min_val = iinfo.min
             max_val = iinfo.max
 
-        if self._num_components == 1:
-            # Single component - always HW format
-            for h in range(height):
-                self._codestream_pull(0, out=image[h], min_val=min_val, max_val=max_val)
-        elif self._channel_order == 'CHW':
-            # Non-RGB multi-component - use planar flag for format detection
-            for c in range(self._num_components):
-                for h in range(height):
-                    self._codestream_pull(c, out=image[c, h, :], min_val=min_val, max_val=max_val)
-        else:
-            # Non-planar mode was used for writing - return HWC format
-            for c in range(self._num_components):
-                for h in range(height):
-                    self._codestream_pull(c, out=image[h, :, c], min_val=min_val, max_val=max_val)
+        self._codestream.pull_all_components(image, self._num_components, self._channel_order, min_val, max_val)
 
         self._close_codestream_and_file()
         return image
-
-    def _codestream_pull(self, component, out, min_val=None, max_val=None):
-        line = self._codestream.pull(component)
-        i32_ptr = ctypes.cast(line.i32_address, ctypes.POINTER(ctypes.c_int32))
-        line_array = np.ctypeslib.as_array(
-            ctypes.cast(i32_ptr, ctypes.POINTER(ctypes.c_int32)),
-            shape=(line.size,)
-        )
-
-        # Aassume min_val is not None if max_val is not None
-        if max_val is not None:
-            line_array = np.clip(
-                line_array,
-                min_val,
-                max_val,
-                out=out,
-                casting='unsafe',
-            )
-        else:
-            out[:] = line_array
 
     def _close_codestream_and_file(self):
         if self._codestream is not None:
