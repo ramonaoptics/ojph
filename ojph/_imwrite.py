@@ -38,8 +38,8 @@ def imwrite_to_memory(
     qstep=None,
     progression_order=None,
     tlm_marker=True,
-    tileparts_at_resolutions=True,
-    tileparts_at_components=False,
+    tileparts_at_resolutions=None,
+    tileparts_at_components=None,
 ):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
@@ -71,8 +71,8 @@ def imwrite(
     qstep=None,
     progression_order=None,
     tlm_marker=True,
-    tileparts_at_resolutions=True,
-    tileparts_at_components=False,
+    tileparts_at_resolutions=None,
+    tileparts_at_components=None,
 ):
     # Auto-detect channel order if not provided
     if channel_order is None:
@@ -148,8 +148,11 @@ def imwrite(
     if not reversible and qstep is not None:
         codestream.access_qcd().set_irrev_quant(qstep)
     codestream.set_planar(num_components > 1)
-    # Set tile parts for resolution, but not for channels
-    codestream.set_tilepart_divisions(True, False)
+    if tileparts_at_resolutions is None:
+        tileparts_at_resolutions = progression_order == "RLCP"
+    if tileparts_at_components is None:
+        tileparts_at_components = False
+    codestream.set_tilepart_divisions(tileparts_at_resolutions, tileparts_at_components)
     codestream.request_tlm_marker(tlm_marker)
 
     codestream.write_headers(ojph_file, None, 0)
