@@ -119,6 +119,105 @@ PYBIND11_MODULE(ojph_bindings, m) {
              },
              py::arg("line_buf_obj") = py::none(), py::arg("next_component") = 0,
              py::call_guard<py::gil_scoped_release>())
+        .def("push_all_components",
+             [](codestream &self, py::array image, ui32 num_components, const std::string& channel_order) {
+                 py::buffer_info buf = image.request();
+
+                 char format_char = buf.format[0];
+                 size_t element_size = buf.itemsize;
+
+                 size_t height, width;
+                 size_t component_stride;
+
+                 if (num_components == 1) {
+                     if (buf.ndim != 2) {
+                         throw py::value_error("Image must be 2-dimensional for single component");
+                     }
+                     height = buf.shape[0];
+                     width = buf.shape[1];
+                     component_stride = 0;
+                 } else {
+                     if (buf.ndim != 3) {
+                         throw py::value_error("Image must be 3-dimensional for multiple components");
+                     }
+                     if (channel_order == "CHW") {
+                         height = buf.shape[1];
+                         width = buf.shape[2];
+                         component_stride = buf.strides[0];
+                     } else {
+                         height = buf.shape[0];
+                         width = buf.shape[1];
+                         component_stride = buf.strides[2];
+                     }
+                 }
+
+                 size_t row_stride = (num_components == 1 || channel_order == "CHW") ? buf.strides[buf.ndim - 2] : buf.strides[0];
+                 size_t col_stride = (num_components == 1 || channel_order == "CHW") ? buf.strides[buf.ndim - 1] : buf.strides[1];
+
+                 {
+                     py::gil_scoped_release release;
+                     ui32 next_comp = 0;
+                     ui32& next_comp_ref = next_comp;
+                     line_buf* line = self.exchange(nullptr, next_comp_ref);
+
+                     for (ui32 c = 0; c < num_components; ++c) {
+                         char* component_base = static_cast<char*>(buf.ptr);
+                         if (num_components > 1) {
+                             if (channel_order == "CHW") {
+                                 component_base += c * component_stride;
+                             } else {
+                                 component_base += c * component_stride;
+                             }
+                         }
+
+                         for (size_t h = 0; h < height; ++h) {
+                             char* row_start = component_base + h * row_stride;
+                             si32* line_data = line->i32;
+                             size_t line_size = line->size;
+
+                             if (line_size != width) {
+                                 throw py::value_error("Line size mismatch");
+                             }
+
+                             if (element_size == 1) {
+                                 if (format_char == 'B') {
+                                     for (size_t i = 0; i < line_size; ++i) {
+                                         line_data[i] = static_cast<si32>(*reinterpret_cast<const ui8*>(row_start + i * col_stride));
+                                     }
+                                 } else {
+                                     for (size_t i = 0; i < line_size; ++i) {
+                                         line_data[i] = static_cast<si32>(*reinterpret_cast<const si8*>(row_start + i * col_stride));
+                                     }
+                                 }
+                             } else if (element_size == 2) {
+                                 if (format_char == 'H') {
+                                     for (size_t i = 0; i < line_size; ++i) {
+                                         line_data[i] = static_cast<si32>(*reinterpret_cast<const ui16*>(row_start + i * col_stride));
+                                     }
+                                 } else {
+                                     for (size_t i = 0; i < line_size; ++i) {
+                                         line_data[i] = static_cast<si32>(*reinterpret_cast<const si16*>(row_start + i * col_stride));
+                                     }
+                                 }
+                             } else {
+                                 if (format_char == 'I' || format_char == 'L') {
+                                     for (size_t i = 0; i < line_size; ++i) {
+                                         line_data[i] = static_cast<si32>(*reinterpret_cast<const ui32*>(row_start + i * col_stride));
+                                     }
+                                 } else {
+                                     for (size_t i = 0; i < line_size; ++i) {
+                                         line_data[i] = *reinterpret_cast<const si32*>(row_start + i * col_stride);
+                                     }
+                                 }
+                             }
+
+                             next_comp = (h == height - 1 && c < num_components - 1) ? c + 1 : c;
+                             line = self.exchange(line, next_comp_ref);
+                         }
+                     }
+                 }
+             },
+             py::arg("image"), py::arg("num_components"), py::arg("channel_order"))
         .def("flush", &codestream::flush)
         .def("enable_resilience", &codestream::enable_resilience)
         .def("read_headers", &codestream::read_headers)
