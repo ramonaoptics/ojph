@@ -115,6 +115,20 @@ def test_imwrite_to_memory_consistency():
     )
 
 
+def test_imwrite_3d_single_channel_as_monochrome(tmp_path):
+    test_image = np.random.randint(0, 256, (100, 150, 1), dtype=np.uint8)
+
+    compressed_data = imwrite_to_memory(test_image)
+
+    filename = tmp_path / 'test.j2c'
+    with open(filename, 'wb') as f:
+        f.write(compressed_data.tobytes())
+
+    loaded_image = imread(filename)
+    expected_image = test_image.squeeze()
+    np.testing.assert_array_equal(loaded_image, expected_image)
+
+
 def test_lossless_vs_lossy_memory_error_increase(tmp_path):
     rng = np.random.default_rng(321)
     test_image = rng.integers(0, 256, (256, 256), dtype=np.uint8)

@@ -130,12 +130,17 @@ PYBIND11_MODULE(ojph_bindings, m) {
                  size_t component_stride;
 
                  if (num_components == 1) {
-                     if (buf.ndim != 2) {
-                         throw py::value_error("Image must be 2-dimensional for single component");
+                     if (buf.ndim == 2) {
+                         height = buf.shape[0];
+                         width = buf.shape[1];
+                         component_stride = 0;
+                     } else if (buf.ndim == 3 && buf.shape[2] == 1) {
+                         height = buf.shape[0];
+                         width = buf.shape[1];
+                         component_stride = 0;
+                     } else {
+                         throw py::value_error("Image must be 2-dimensional or 3-dimensional with last dimension of 1 for single component");
                      }
-                     height = buf.shape[0];
-                     width = buf.shape[1];
-                     component_stride = 0;
                  } else {
                      if (buf.ndim != 3) {
                          throw py::value_error("Image must be 3-dimensional for multiple components");
@@ -151,8 +156,17 @@ PYBIND11_MODULE(ojph_bindings, m) {
                      }
                  }
 
-                 size_t row_stride = (num_components == 1 || channel_order == "CHW") ? buf.strides[buf.ndim - 2] : buf.strides[0];
-                 size_t col_stride = (num_components == 1 || channel_order == "CHW") ? buf.strides[buf.ndim - 1] : buf.strides[1];
+                 size_t row_stride, col_stride;
+                 if (num_components == 1) {
+                     row_stride = buf.strides[0];
+                     col_stride = buf.strides[1];
+                 } else if (channel_order == "CHW") {
+                     row_stride = buf.strides[1];
+                     col_stride = buf.strides[2];
+                 } else {
+                     row_stride = buf.strides[0];
+                     col_stride = buf.strides[1];
+                 }
 
                  {
                      py::gil_scoped_release release;
