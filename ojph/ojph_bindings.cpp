@@ -1,7 +1,9 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
-
+#include <algorithm>
+#include <cstring>
+#include <limits>
 
 #include <openjph/ojph_file.h>
 #include <openjph/ojph_codestream.h>
@@ -13,7 +15,7 @@ using namespace ojph;
 
 PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<infile_base>(m, "InfileBase")
-        .def("read", &infile_base::read)
+        .def("read", &infile_base::read, py::call_guard<py::gil_scoped_release>())
         .def("seek", &infile_base::seek)
         .def("tell", &infile_base::tell)
         .def("eof", &infile_base::eof)
@@ -22,7 +24,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<j2c_infile, infile_base>(m, "J2CInfile")
         .def(py::init<>())
         .def("open", &j2c_infile::open)
-        .def("read", &j2c_infile::read)
+        .def("read", &j2c_infile::read, py::call_guard<py::gil_scoped_release>())
         .def("seek", [](infile_base& self, si64 offset, int origin) {
             return self.seek(offset, static_cast<enum infile_base::seek>(origin));
         })
@@ -50,6 +52,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
             if (buf.size < size) {
                 throw py::value_error("Buffer size is smaller than requested read size");
             }
+            py::gil_scoped_release release;
             return self.read(static_cast<void*>(buf.ptr), size);
         }, py::arg("buffer"), py::arg("size"))
         .def("seek", [](mem_infile& self, si64 offset, int origin) {
@@ -61,7 +64,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
 
 
     py::class_<outfile_base>(m, "outfileBase")
-        .def("write", &outfile_base::write)
+        .def("write", &outfile_base::write, py::call_guard<py::gil_scoped_release>())
         .def("seek", &outfile_base::seek)
         .def("tell", &outfile_base::tell)
         .def("close", &outfile_base::close);
@@ -69,14 +72,14 @@ PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<j2c_outfile, outfile_base>(m, "J2COutfile")
         .def(py::init<>())
         .def("open", &j2c_outfile::open)
-        .def("write", &j2c_outfile::write)
+        .def("write", &j2c_outfile::write, py::call_guard<py::gil_scoped_release>())
         .def("tell", &j2c_outfile::tell)
         .def("close", &j2c_outfile::close);
 
     py::class_<mem_outfile, outfile_base>(m, "MemOutfile")
         .def(py::init<>())
         .def("open", &mem_outfile::open, py::arg("initial_size") = 65536, py::arg("clear_mem") = false)
-        .def("write", &mem_outfile::write)
+        .def("write", &mem_outfile::write, py::call_guard<py::gil_scoped_release>())
         .def("tell", &mem_outfile::tell)
         .def("get_used_size", &mem_outfile::get_used_size)
         .def("get_buf_size", &mem_outfile::get_buf_size)
@@ -84,7 +87,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
             return self.seek(offset, static_cast<enum outfile_base::seek>(origin));
         })
         .def("close", &mem_outfile::close)
-        .def("write_to_file", &mem_outfile::write_to_file)
+        .def("write_to_file", &mem_outfile::write_to_file, py::call_guard<py::gil_scoped_release>())
         .def("get_data", [](mem_outfile& self) {
             const ui8* data = self.get_data();
             si64 size = self.tell();
@@ -105,6 +108,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
              [](codestream &self, outfile_base *file, py::object comments, ui32 num_comments) {
                  // Check if the comments argument is None and convert it to nullptr if so
                  const comment_exchange* comments_ptr = comments.is_none() ? nullptr : comments.cast<const comment_exchange*>();
+                 py::gil_scoped_release release;
                  self.write_headers(file, comments_ptr, num_comments);
              },
              py::arg("file"), py::arg("comments") = py::none(), py::arg("num_comments") = 0)
@@ -114,15 +118,76 @@ PYBIND11_MODULE(ojph_bindings, m) {
                  if (!line_buf_obj.is_none()) {
                      buf = line_buf_obj.cast<line_buf*>();
                  }
+                 py::gil_scoped_release release;
                  return self.exchange(buf, next_component);
              },
              py::arg("line_buf_obj") = py::none(), py::arg("next_component") = 0)
-        .def("flush", &codestream::flush)
+        .def("flush", &codestream::flush, py::call_guard<py::gil_scoped_release>())
         .def("enable_resilience", &codestream::enable_resilience)
-        .def("read_headers", &codestream::read_headers)
+        .def("read_headers", &codestream::read_headers, py::call_guard<py::gil_scoped_release>())
         .def("restrict_input_resolution", &codestream::restrict_input_resolution)
-        .def("create", &codestream::create)
-        .def("pull", &codestream::pull)
+        .def("create", &codestream::create, py::call_guard<py::gil_scoped_release>())
+        .def("pull", &codestream::pull, py::call_guard<py::gil_scoped_release>())
+        .def("pull_lines_to_array",
+             [](codestream &self, ui32 component, ui32 num_lines,
+                py::array_t<si32> out_array, py::object min_val_obj, py::object max_val_obj) -> ui32 {
+                 py::buffer_info out_buf = out_array.request();
+                 if (out_buf.ndim != 2) {
+                     throw py::value_error("Output array must be 2-dimensional");
+                 }
+
+                 size_t line_size = out_buf.shape[1];
+                 si32* out_ptr = static_cast<si32*>(out_buf.ptr);
+
+                 bool has_clipping = !min_val_obj.is_none() || !max_val_obj.is_none();
+                 si32 min_val = min_val_obj.is_none() ? std::numeric_limits<si32>::min()
+                                                      : min_val_obj.cast<si32>();
+                 si32 max_val = max_val_obj.is_none() ? std::numeric_limits<si32>::max()
+                                                      : max_val_obj.cast<si32>();
+
+                 ui32 lines_pulled = 0;
+                 ui32 current_comp = component;
+
+                 {
+                     py::gil_scoped_release release;
+
+                     for (ui32 h = 0; h < num_lines; ++h) {
+                         line_buf* line = self.pull(current_comp);
+                         if (line == nullptr || line->i32 == nullptr) {
+                             break;
+                         }
+
+                         if (current_comp != component) {
+                             break;
+                         }
+
+                         if (line->size != line_size) {
+                             throw py::value_error("Line size mismatch");
+                         }
+
+                         const si32* src_ptr = line->i32;
+                         si32* dst_ptr = out_ptr + h * line_size;
+
+                         if (has_clipping) {
+                             for (size_t i = 0; i < line_size; ++i) {
+                                 si32 val = src_ptr[i];
+                                 dst_ptr[i] = std::max(min_val, std::min(max_val, val));
+                             }
+                         } else {
+                             std::memcpy(dst_ptr, src_ptr, line_size * sizeof(si32));
+                         }
+
+                         lines_pulled++;
+                     }
+                 }
+
+                 return lines_pulled;
+             },
+             py::arg("component"),
+             py::arg("num_lines"),
+             py::arg("out_array"),
+             py::arg("min_val") = py::none(),
+             py::arg("max_val") = py::none())
         .def("close", &codestream::close)
         .def("access_siz", &codestream::access_siz)
         .def("access_cod", &codestream::access_cod)

@@ -303,19 +303,13 @@ class OJPHImageFile:
             max_val = iinfo.max
 
         if self._num_components == 1:
-            # Single component - always HW format
-            for h in range(height):
-                self._codestream_pull(0, out=image[h], min_val=min_val, max_val=max_val)
+            self._codestream_pull_lines_optimized(0, height, image, min_val, max_val)
         elif self._channel_order == 'CHW':
-            # Non-RGB multi-component - use planar flag for format detection
             for c in range(self._num_components):
-                for h in range(height):
-                    self._codestream_pull(c, out=image[c, h, :], min_val=min_val, max_val=max_val)
+                self._codestream_pull_lines_optimized(c, height, image[c, :, :], min_val, max_val)
         else:
-            # Non-planar mode was used for writing - return HWC format
             for c in range(self._num_components):
-                for h in range(height):
-                    self._codestream_pull(c, out=image[h, :, c], min_val=min_val, max_val=max_val)
+                self._codestream_pull_lines_optimized(c, height, image[:, :, c], min_val, max_val)
 
         self._close_codestream_and_file()
         return image
@@ -339,6 +333,25 @@ class OJPHImageFile:
             )
         else:
             out[:] = line_array
+
+    def _codestream_pull_lines_optimized(self, component, num_lines, out_array, min_val=None, max_val=None):
+        if out_array.ndim != 2:
+            raise ValueError("Output array must be 2D for optimized pull")
+
+        height, width = out_array.shape
+        if num_lines != height:
+            raise ValueError(f"num_lines ({num_lines}) must match array height ({height})")
+
+        lines_pulled = self._codestream.pull_lines_to_array(
+            component,
+            num_lines,
+            out_array,
+            min_val if min_val is not None else None,
+            max_val if max_val is not None else None
+        )
+
+        if lines_pulled != num_lines:
+            raise RuntimeError(f"Expected {num_lines} lines, but only pulled {lines_pulled}")
 
     def _close_codestream_and_file(self):
         if self._codestream is not None:
