@@ -136,3 +136,81 @@ def test_imread_from_memory_non_reversible_no_negative_values():
         f"Min value: {decoded_image.min()}, "
         f"Values below 50: {np.sum(decoded_image < 50)}"
     )
+
+
+@pytest.mark.parametrize('size', [(96, 96), (97, 97), (100, 100), (127, 127), (128, 128)])
+def test_get_level_shape(size):
+    """Test that get_level_shape returns correct dimensions at each level."""
+    test_image = np.random.randint(0, 256, size, dtype=np.uint8)
+    compressed_data = imwrite_to_memory(test_image, num_decompositions=5)
+
+    reader = OJPHImageFile.from_memory(compressed_data)
+
+    # Level 0 should match the original shape
+    assert reader.get_level_shape(0) == size
+
+    # Test each level and verify by actually reading at that level
+    for level in range(1, reader.levels + 1):
+        expected_shape = reader.get_level_shape(level)
+
+        # Create a new reader to actually read at this level
+        reader2 = OJPHImageFile.from_memory(compressed_data)
+        actual_image = reader2.read_image(level=level)
+
+        assert actual_image.shape == expected_shape, (
+            f"Level {level}: get_level_shape returned {expected_shape} "
+            f"but read_image returned shape {actual_image.shape}"
+        )
+
+
+def test_get_level_shape_ceiling_division():
+    """Test that get_level_shape uses ceiling division for odd dimensions."""
+    # 97 is chosen because it doesn't divide evenly by powers of 2
+    test_image = np.random.randint(0, 256, (97, 97), dtype=np.uint8)
+    compressed_data = imwrite_to_memory(test_image, num_decompositions=5)
+
+    reader = OJPHImageFile.from_memory(compressed_data)
+
+    # Expected shapes using ceiling division: ceil(97 / 2^level)
+    expected_shapes = {
+        0: (97, 97),
+        1: (49, 49),  # ceil(97/2) = 49, not 48
+        2: (25, 25),  # ceil(97/4) = 25, not 24
+        3: (13, 13),  # ceil(97/8) = 13, not 12
+        4: (7, 7),    # ceil(97/16) = 7, not 6
+        5: (4, 4),    # ceil(97/32) = 4, not 3
+    }
+
+    for level, expected in expected_shapes.items():
+        assert reader.get_level_shape(level) == expected, (
+            f"Level {level}: expected {expected}, got {reader.get_level_shape(level)}"
+        )
+
+
+def test_get_level_shape_invalid_level():
+    """Test that get_level_shape raises errors for invalid levels."""
+    test_image = np.random.randint(0, 256, (64, 64), dtype=np.uint8)
+    compressed_data = imwrite_to_memory(test_image, num_decompositions=3)
+
+    reader = OJPHImageFile.from_memory(compressed_data)
+
+    with pytest.raises(ValueError, match="level must be >= 0"):
+        reader.get_level_shape(-1)
+
+    with pytest.raises(ValueError, match="cannot be greater than"):
+        reader.get_level_shape(reader.levels + 1)
+
+
+def test_get_level_shape_rgb():
+    """Test get_level_shape with multi-channel images."""
+    test_image = np.random.randint(0, 256, (97, 97, 3), dtype=np.uint8)
+    compressed_data = imwrite_to_memory(test_image, channel_order='HWC', num_decompositions=3)
+
+    reader = OJPHImageFile.from_memory(compressed_data, channel_order='HWC')
+
+    # Level 0 should include channel dimension
+    assert reader.get_level_shape(0) == (97, 97, 3)
+
+    # Other levels should also include channel dimension
+    assert reader.get_level_shape(1) == (49, 49, 3)
+    assert reader.get_level_shape(2) == (25, 25, 3)
