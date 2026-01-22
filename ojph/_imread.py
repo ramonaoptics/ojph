@@ -230,6 +230,58 @@ class OJPHImageFile:
     def progression_order(self):
         return self._progression_order
 
+    def get_level_shape(self, level):
+        """Get the image shape at a specific decomposition level.
+
+        JPEG2000 wavelet decomposition uses ceiling division for level shapes,
+        so odd dimensions round up. For example, a 97x97 image has level 3
+        shape of 13x13, not 12x12.
+
+        Parameters
+        ----------
+        level : int
+            The decomposition level (0 = full resolution).
+
+        Returns
+        -------
+        tuple
+            The (height, width) or (height, width, channels) shape at that level,
+            matching the format of the `shape` property.
+        """
+        if level < 0:
+            raise ValueError(f"level must be >= 0, got {level}")
+        if level > self._num_decompositions:
+            raise ValueError(
+                f"level ({level}) cannot be greater than the number of "
+                f"decompositions ({self._num_decompositions})"
+            )
+
+        if level == 0:
+            return self._shape
+
+        # JPEG2000 DWT uses ceiling division for level dimensions:
+        # dim_at_level = ceil(dim_at_level0 / 2^level)
+        # In Python: ceil(a/b) = -(-a // b)
+        divisor = 1 << level  # 2^level
+
+        # Get base height/width from shape (accounting for channel position)
+        if self._num_components == 1:
+            height, width = self._shape
+        elif self._channel_order == 'CHW':
+            _, height, width = self._shape
+        else:
+            height, width, _ = self._shape
+
+        level_height = -(-height // divisor)
+        level_width = -(-width // divisor)
+
+        if self._num_components == 1:
+            return (level_height, level_width)
+        elif self._channel_order == 'CHW':
+            return (self._num_components, level_height, level_width)
+        else:
+            return (level_height, level_width, self._num_components)
+
     def _open_file(self):
         self._ojph_file = J2CInfile()
         self._ojph_file.open(self._filename)
