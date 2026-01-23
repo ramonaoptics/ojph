@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-01-23
+
+- Fix memory leak in `imwrite_to_memory()`. The codestream and memory outfile are now
+  properly closed after encoding.
+
+
+
 ## [0.6.0] - 2026-01-22
 
 - Provide a new method `get_level_shape` to help get the shape after decoding for
