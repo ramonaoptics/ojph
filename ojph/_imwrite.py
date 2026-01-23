@@ -57,7 +57,10 @@ def imwrite_to_memory(
         tileparts_at_resolutions=tileparts_at_resolutions,
         tileparts_at_components=tileparts_at_components,
     )
-    return np.asarray(CompressedData(mem_outfile, codestream))
+    data = bytes(mem_outfile.get_data())
+    codestream.close()
+    mem_outfile.close()
+    return np.frombuffer(data, dtype=np.uint8)
 
 
 def imwrite(
