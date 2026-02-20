@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-02-20
+
+- Fix encoding errors associated with datatypes where the order is explicitely defined.
+
 ## [0.6.1] - 2026-01-23
 
 - Fix memory leak in `imwrite_to_memory()`. The codestream and memory outfile are now
