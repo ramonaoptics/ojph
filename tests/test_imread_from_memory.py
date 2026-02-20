@@ -51,17 +51,94 @@ def test_imread_from_memory_different_sizes(size):
 
 
 @pytest.mark.parametrize('dtype', [
-    np.uint8, np.uint16, np.uint32,
-    np.int8, np.int16, np.int32,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.int8,
+    np.int16,
+    np.int32,
+    '<u2',
+    '<u4',
+    '>u2',
+    '>u4',
+    '<i2',
+    '<i4',
+    '>i2',
+    '>i4',
 ])
 def test_imread_from_memory_different_dtypes(dtype):
     test_image = np.random.randint(
-        np.iinfo(dtype).min, np.iinfo(dtype).max, (64, 64), dtype=dtype)
+        np.iinfo(dtype).min,
+        np.iinfo(dtype).max,
+        (64, 64),
+        dtype=np.dtype(dtype).newbyteorder('='),
+    )
+    test_image = np.asarray(test_image, dtype=dtype)
     compressed_data = imwrite_to_memory(test_image)
     decoded_image = imread_from_memory(compressed_data)
 
     assert np.array_equal(test_image, decoded_image)
-    assert decoded_image.dtype == test_image.dtype
+    assert decoded_image.dtype == test_image.dtype.newbyteorder('=')
+
+
+def test_imread_from_memory_uint16_explicit_little_endian_roundtrip():
+    dtype_le = np.dtype('<u2')
+    rng = np.random.default_rng(seed=7)
+    test_image = rng.integers(0, 65535, size=(128, 128), dtype=dtype_le)
+    compressed_data = imwrite_to_memory(
+        test_image.reshape(128, 128, 1),
+        channel_order='HWC',
+        num_decompositions=1,
+        reversible=True,
+        tlm_marker=True,
+        tileparts_at_resolutions=True,
+    )
+    decoded = imread_from_memory(compressed_data, channel_order='HWC')
+    np.testing.assert_array_equal(decoded, test_image)
+    assert decoded.dtype == test_image.dtype
+
+
+def test_imread_from_memory_uint16_explicit_little_endian_2d_roundtrip():
+    dtype_le = np.dtype('<u2')
+    rng = np.random.default_rng(seed=11)
+    test_image = rng.integers(0, 65535, size=(64, 64), dtype=dtype_le)
+    compressed_data = imwrite_to_memory(test_image)
+    decoded = imread_from_memory(compressed_data)
+    np.testing.assert_array_equal(decoded, test_image)
+    assert decoded.dtype == test_image.dtype
+    assert (test_image >= 32768).sum() > 0
+
+
+def test_imread_from_memory_uint16_explicit_big_endian_roundtrip():
+    rng = np.random.default_rng(seed=7)
+    test_image = np.asarray(
+        rng.integers(0, 65535, size=(128, 128), dtype=np.uint16),
+        dtype=np.dtype('>u2'),
+    )
+    compressed_data = imwrite_to_memory(
+        test_image.reshape(128, 128, 1),
+        channel_order='HWC',
+        num_decompositions=1,
+        reversible=True,
+        tlm_marker=True,
+        tileparts_at_resolutions=True,
+    )
+    decoded = imread_from_memory(compressed_data, channel_order='HWC')
+    np.testing.assert_array_equal(decoded, test_image)
+    assert (test_image >= 32768).sum() > 0
+    np.testing.assert_array_equal(decoded[test_image >= 32768], test_image[test_image >= 32768])
+
+
+def test_imread_from_memory_uint16_explicit_big_endian_2d_roundtrip():
+    rng = np.random.default_rng(seed=11)
+    test_image = np.asarray(
+        rng.integers(0, 65535, size=(64, 64), dtype=np.uint16),
+        dtype=np.dtype('>u2'),
+    )
+    compressed_data = imwrite_to_memory(test_image)
+    decoded = imread_from_memory(compressed_data)
+    np.testing.assert_array_equal(decoded, test_image)
+    assert (test_image >= 32768).sum() > 0
 
 
 def test_imread_from_memory_invalid_input():

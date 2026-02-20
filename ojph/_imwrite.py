@@ -160,6 +160,12 @@ def imwrite(
 
     codestream.write_headers(ojph_file, None, 0)
 
+    # For native byte orders, even if the byte order of the input is
+    # explicitely set
+    # this will be a no-operation
+    # and helps streamline code inside push_all_components
+    if image.dtype.byteorder not in ("=", "|"):
+        image = np.asarray(image,  dtype=image.dtype.newbyteorder('='))
     codestream.push_all_components(image, num_components, channel_order)
 
     codestream.flush()

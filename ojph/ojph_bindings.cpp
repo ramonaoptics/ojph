@@ -123,7 +123,8 @@ PYBIND11_MODULE(ojph_bindings, m) {
              [](codestream &self, py::array image, ui32 num_components, const std::string& channel_order) {
                  py::buffer_info buf = image.request();
 
-                 char format_char = buf.format[0];
+                 const std::string& fmt = buf.format;
+                 char format_char = fmt.empty() ? '\0' : (fmt.size() > 1 && (fmt[0] == '<' || fmt[0] == '>' || fmt[0] == '=' || fmt[0] == '|')) ? fmt[1] : fmt[0];
                  size_t element_size = buf.itemsize;
 
                  size_t height, width;
@@ -240,18 +241,19 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("pull", &codestream::pull, py::call_guard<py::gil_scoped_release>())
         .def("pull_all_components",
              [](codestream &self, py::array output, ui32 num_components, const std::string& channel_order, py::object min_val_obj, py::object max_val_obj) {
-                 py::buffer_info buf = output.request();
+                py::buffer_info buf = output.request();
 
-                 bool do_clip = !min_val_obj.is_none() && !max_val_obj.is_none();
-                 si32 min_val = 0;
-                 si32 max_val = 0;
-                 if (do_clip) {
-                     min_val = min_val_obj.cast<si32>();
-                     max_val = max_val_obj.cast<si32>();
-                 }
+                bool do_clip = !min_val_obj.is_none() && !max_val_obj.is_none();
+                si32 min_val = 0;
+                si32 max_val = 0;
+                if (do_clip) {
+                    min_val = min_val_obj.cast<si32>();
+                    max_val = max_val_obj.cast<si32>();
+                }
 
-                 char format_char = buf.format[0];
-                 bool is_unsigned = (format_char == 'B' || format_char == 'H' || format_char == 'I' || format_char == 'L');
+                const std::string& fmt = buf.format;
+                char format_char = fmt.empty() ? '\0' : (fmt.size() > 1 && (fmt[0] == '<' || fmt[0] == '>' || fmt[0] == '=' || fmt[0] == '|')) ? fmt[1] : fmt[0];
+                bool is_unsigned = (format_char == 'B' || format_char == 'H' || format_char == 'I' || format_char == 'L');
                  size_t element_size = buf.itemsize;
 
                  size_t height, width;
