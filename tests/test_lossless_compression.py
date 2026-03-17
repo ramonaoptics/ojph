@@ -31,6 +31,25 @@ def test_write_lossless_grayscale(shape, tmp_path):
 
 
 @pytest.mark.parametrize(
+    'shape', [
+        (200, 100),
+        (1024, 256),
+        (256, 1024),
+    ]
+)
+@pytest.mark.parametrize(
+    'use_wavelet_oneXone', [False, True],
+)
+def test_write_lossless_grayscale_wavelet_oneXone(shape, use_wavelet_oneXone, tmp_path):
+    filename = tmp_path / 'test_wavelet_oneXone.jp2'
+    data = np.random.randint(0, 256, shape, dtype=np.uint8)
+    imwrite(filename, data, wavelet_oneXone=use_wavelet_oneXone)
+    image_read = imread(filename)
+
+    np.testing.assert_array_equal(data, image_read)
+
+
+@pytest.mark.parametrize(
     'dtype', [
         np.uint8,
         np.int8,
@@ -144,6 +163,14 @@ def test_write_lossless_color_dtypes(dtype, tmp_path):
     np.testing.assert_array_equal(data, image_read)
 
 
+def test_wavelet_oneXone_requires_reversible(tmp_path):
+    filename = tmp_path / 'test_wavelet_oneXone_lossy.jp2'
+    data = np.random.randint(0, 256, (128, 128), dtype=np.uint8)
+
+    with pytest.raises(ValueError, match="wavelet_oneXone requires reversible=True"):
+        imwrite(filename, data, reversible=False, wavelet_oneXone=True)
+
+
 @pytest.mark.parametrize(
     'shape', [
         (100, 150),
@@ -215,6 +242,32 @@ def test_write_lossless_small_images(tmp_path):
     imwrite(filename, data_tiny_rgba)
     image_read = imread(filename)
     np.testing.assert_array_equal(data_tiny_rgba, image_read)
+
+
+def test_ll_levels_standard_seed0(tmp_path):
+    filename = tmp_path / "seed0_levels.jp2"
+    filename_r1x1 = tmp_path / "seed0_levels_r1x1.jp2"
+
+    h, w = 1024, 1024
+    y, x = np.ogrid[:h, :w]
+    cy, cx = h // 2, w // 2
+    r = min(h, w) // 4
+    data = np.zeros((h, w), dtype=np.uint8)
+    data[(x - cx) ** 2 + (y - cy) ** 2 <= r * r] = 255
+
+    imwrite(filename, data)
+    for level in (1, 2, 3, 4):
+        ll = imread(filename, level=level)
+        expected = data[:: 2 ** level, :: 2 ** level]
+        assert ll.shape == expected.shape
+        assert not np.array_equal(ll, expected)
+
+    imwrite(filename_r1x1, data, r1x1=True)
+    for level in (1, 2, 3, 4):
+        ll = imread(filename_r1x1, skipped_res_for_data=level, skipped_res_for_recon=level)
+        expected = data[:: 2 ** level, :: 2 ** level]
+        assert ll.shape == expected.shape
+        np.testing.assert_array_equal(ll, expected)
 
 
 def test_channel_order_validation(tmp_path):

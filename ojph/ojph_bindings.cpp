@@ -443,6 +443,8 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("set_progression_order", &param_cod::set_progression_order, py::arg("name"))
         .def("set_color_transform", &param_cod::set_color_transform, py::arg("color_transform"))
         .def("set_reversible", &param_cod::set_reversible, py::arg("reversible"))
+        .def("set_wavelet_oneXone", &param_cod::set_wavelet_oneXone, py::arg("enable"))
+        .def("set_r1x1", &param_cod::set_wavelet_oneXone, py::arg("enable"))
 
         .def("get_num_decompositions", &param_cod::get_num_decompositions)
         .def("get_block_dims", &param_cod::get_block_dims)
