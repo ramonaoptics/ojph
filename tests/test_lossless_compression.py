@@ -163,12 +163,38 @@ def test_write_lossless_color_dtypes(dtype, tmp_path):
     np.testing.assert_array_equal(data, image_read)
 
 
-def test_wavelet_oneXone_requires_reversible(tmp_path):
+def test_wavelet_oneXone_irreversible_lossy(tmp_path):
     filename = tmp_path / 'test_wavelet_oneXone_lossy.jp2'
     data = np.random.randint(0, 256, (128, 128), dtype=np.uint8)
 
-    with pytest.raises(ValueError, match="wavelet_oneXone requires reversible=True"):
-        imwrite(filename, data, reversible=False, wavelet_oneXone=True)
+    imwrite(filename, data, reversible=False, wavelet_oneXone=True, qstep=0.1)
+    image_read = imread(filename)
+
+    assert image_read.shape == data.shape
+    mse = _mse(data, image_read)
+    assert mse >= 0.0
+
+    imwrite(filename, data, reversible=True, wavelet_oneXone=True)
+    image_read = imread(filename)
+
+    assert image_read.shape == data.shape
+    np.testing.assert_array_equal(data, image_read)
+
+
+def test_wavelet_oneXone_irreversible_mse_monotonic(tmp_path):
+    filename = tmp_path / 'test_wavelet_oneXone_irrev_mse.jp2'
+    data = np.random.randint(0, 256, (128, 128), dtype=np.uint8)
+
+    prev_mse = None
+    for q in [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]:
+        imwrite(filename, data, reversible=False, wavelet_oneXone=True, qstep=q)
+        image_read = imread(filename)
+        assert image_read.shape == data.shape
+        mse = _mse(data, image_read)
+        assert mse >= 0.0
+        if prev_mse is not None:
+            assert mse >= prev_mse
+        prev_mse = mse
 
 
 @pytest.mark.parametrize(
@@ -256,13 +282,17 @@ def test_ll_levels_standard_seed0(tmp_path):
     data[(x - cx) ** 2 + (y - cy) ** 2 <= r * r] = 255
 
     imwrite(filename, data)
+    ll = imread(filename, level=0)
+    assert ll.shape == data.shape
+    assert np.array_equal(ll, data)
+
     for level in (1, 2, 3, 4):
         ll = imread(filename, level=level)
         expected = data[:: 2 ** level, :: 2 ** level]
         assert ll.shape == expected.shape
         assert not np.array_equal(ll, expected)
 
-    imwrite(filename_r1x1, data, r1x1=True)
+    imwrite(filename_r1x1, data, wavelet_oneXone=True)
     for level in (1, 2, 3, 4):
         ll = imread(filename_r1x1, skipped_res_for_data=level, skipped_res_for_recon=level)
         expected = data[:: 2 ** level, :: 2 ** level]

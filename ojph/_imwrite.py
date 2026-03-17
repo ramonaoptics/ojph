@@ -41,7 +41,6 @@ def imwrite_to_memory(
     tileparts_at_resolutions=None,
     tileparts_at_components=None,
     wavelet_oneXone=False,
-    r1x1=None,
 ):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
@@ -58,7 +57,7 @@ def imwrite_to_memory(
         tlm_marker=tlm_marker,
         tileparts_at_resolutions=tileparts_at_resolutions,
         tileparts_at_components=tileparts_at_components,
-        wavelet_oneXone=wavelet_oneXone if r1x1 is None else r1x1,
+        wavelet_oneXone=wavelet_oneXone,
     )
     data = bytes(mem_outfile.get_data())
     codestream.close()
@@ -80,7 +79,6 @@ def imwrite(
     tileparts_at_resolutions=None,
     tileparts_at_components=None,
     wavelet_oneXone=False,
-    r1x1=None,
 ):
     # Auto-detect channel order if not provided
     if channel_order is None:
@@ -150,10 +148,8 @@ def imwrite(
     if reversible is None:
         reversible = True
     cod.set_reversible(reversible)
-    wavelet_oneXone = wavelet_oneXone if r1x1 is None else r1x1
+    wavelet_oneXone = wavelet_oneXone
     if wavelet_oneXone:
-        if not reversible:
-            raise ValueError("wavelet_oneXone requires reversible=True")
         cod.set_wavelet_oneXone(True)
     cod.set_color_transform(False)
     if num_decompositions is not None:
