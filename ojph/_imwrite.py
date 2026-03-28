@@ -148,7 +148,8 @@ def imwrite(
     if reversible is None:
         reversible = True
     cod.set_reversible(reversible)
-    wavelet_oneXone = wavelet_oneXone
+    if wavelet_oneXone and not reversible:
+        raise ValueError('wavelet_oneXone requires reversible=True')
     if wavelet_oneXone:
         cod.set_wavelet_oneXone(True)
     cod.set_color_transform(False)
