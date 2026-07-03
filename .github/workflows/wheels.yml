@@ -58,6 +58,9 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.cibw_archs || 'auto' }}
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macosx_deployment_target }}
+          # Architecture for the Windows (MSVC) OpenJPH build so it matches the
+          # extension's target. Ignored on non-Windows.
+          OJPH_MSVC_ARCH: ${{ matrix.cibw_archs == 'ARM64' && 'ARM64' || 'x64' }}
 
       - uses: actions/upload-artifact@v4
         with:

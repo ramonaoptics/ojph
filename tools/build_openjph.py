@@ -83,12 +83,19 @@ def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path) -> None:
             f"-DCMAKE_OSX_DEPLOYMENT_TARGET={os.environ['MACOSX_DEPLOYMENT_TARGET']}"
         )
 
-    # Use a multi-arch-friendly generator on Windows; default elsewhere.
     if os.name == "nt":
-        # Ninja is available in the cibuildwheel Windows image and avoids the
-        # MSBuild architecture guessing that trips up ARM64 cross builds.
-        if shutil.which("ninja"):
-            args += ["-G", "Ninja"]
+        # Force the Visual Studio (MSVC) generator so OpenJPH is compiled with
+        # the SAME toolchain/ABI as the Python extension (setuptools uses
+        # cl.exe). A Ninja build here silently picks up whatever compiler is
+        # first on PATH -- on the GitHub ARM64 image that produced a GNU-style
+        # ``libopenjph.a`` that MSVC cannot link. ``-A`` selects the target
+        # architecture (x64 or ARM64); the extension's arch is set by the
+        # CPython being built, so CI passes OJPH_MSVC_ARCH to match.
+        generator = os.environ.get("CMAKE_GENERATOR", "Visual Studio 17 2022")
+        args += ["-G", generator]
+        arch = os.environ.get("OJPH_MSVC_ARCH")
+        if arch and "Visual Studio" in generator:
+            args += ["-A", arch]
 
     run(args)
 

@@ -21,7 +21,12 @@ before-all = "python {project}/tools/build_openjph.py"
 environment-pass = ["OJPH_GIT_DESCRIBE"]
 
 test-requires = ["pytest", "numpy"]
-test-command = "pytest {project}/tests"
+# Copy the test suite into cibuildwheel's isolated test dir and run it from
+# there. Running ``pytest {project}/tests`` instead would put the project root
+# on sys.path (tests/ is a package), shadowing the *installed* wheel with the
+# uncompiled source tree ("No module named 'ojph.ojph_bindings'").
+test-sources = ["tests"]
+test-command = "pytest tests"
 # Skip tests where a runtime dependency (numpy) may not yet ship a matching
 # wheel: free-threaded interpreters and Windows/ARM64. The wheels themselves
 # are still built and published for these targets.
