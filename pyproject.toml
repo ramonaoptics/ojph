@@ -1,3 +1,32 @@
 [build-system]
 requires = ["setuptools>=42", "wheel", "pybind11"]
 build-backend = "setuptools.build_meta"
+
+[tool.cibuildwheel]
+# Python 3.12, 3.13, 3.14, plus 3.14 free-threading. Free-threaded interpreters
+# are a standard build in cibuildwheel v4; the `cp314t-*` selector opts them in.
+build = ["cp312-*", "cp313-*", "cp314-*", "cp314t-*"]
+# We ship manylinux (glibc) wheels and CPython only. musllinux and PyPy are not
+# among the requested targets.
+skip = ["*-musllinux*", "pp*"]
+
+# Build a static OpenJPH once per platform before any wheel, then statically
+# link it (see tools/build_openjph.py and setup.py). CMake/Ninja are provided
+# on the host by the workflow (get-cmake); inside the manylinux container we
+# install them with pip (see [tool.cibuildwheel.linux]).
+before-all = "python {project}/tools/build_openjph.py"
+
+# Forward the version string (computed from git in the workflow) into the
+# manylinux build container, where the .git directory is not available.
+environment-pass = ["OJPH_GIT_DESCRIBE"]
+
+test-requires = ["pytest", "numpy"]
+test-command = "pytest {project}/tests"
+# Skip tests where a runtime dependency (numpy) may not yet ship a matching
+# wheel: free-threaded interpreters and Windows/ARM64. The wheels themselves
+# are still built and published for these targets.
+test-skip = ["cp314t-*", "*-win_arm64"]
+
+[tool.cibuildwheel.linux]
+# manylinux containers don't ship CMake/Ninja; grab them from PyPI.
+before-all = "pip install cmake ninja && python {project}/tools/build_openjph.py"
