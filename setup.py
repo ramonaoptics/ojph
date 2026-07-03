@@ -87,6 +87,14 @@ if platform.system() == 'Windows':
     include_dirs.append(os.path.join(prefix, 'Library', 'include'))
     library_dirs.append(os.path.join(prefix, 'Library', 'lib'))
 
+# pybind11 (and OpenJPH's headers) require a modern C++ standard. Some
+# compilers -- notably AppleClang -- still default to an ancient standard when
+# none is given, so request C++17 explicitly rather than relying on the default.
+if platform.system() == 'Windows':
+    extra_compile_args = ['/std:c++17']
+else:
+    extra_compile_args = ['-std=c++17']
+
 ojph_module = Extension(
     'ojph.ojph_bindings',
     sources=['ojph/ojph_bindings.cpp'],
@@ -94,7 +102,7 @@ ojph_module = Extension(
     library_dirs=library_dirs,
     libraries=libraries,
     extra_objects=extra_objects,
-    extra_compile_args=[]
+    extra_compile_args=extra_compile_args
 )
 
 setup(

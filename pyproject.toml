@@ -6,9 +6,9 @@ build-backend = "setuptools.build_meta"
 # Python 3.12, 3.13, 3.14, plus 3.14 free-threading. Free-threaded interpreters
 # are a standard build in cibuildwheel v4; the `cp314t-*` selector opts them in.
 build = ["cp312-*", "cp313-*", "cp314-*", "cp314t-*"]
-# We ship manylinux (glibc) wheels and CPython only. musllinux and PyPy are not
-# among the requested targets.
-skip = ["*-musllinux*", "pp*"]
+# We ship manylinux (glibc) wheels only; musllinux is not a requested target.
+# (PyPy/GraalPy are not enabled by default, so they need no explicit skip.)
+skip = ["*-musllinux*"]
 
 # Build a static OpenJPH once per platform before any wheel, then statically
 # link it (see tools/build_openjph.py and setup.py). CMake/Ninja are provided
