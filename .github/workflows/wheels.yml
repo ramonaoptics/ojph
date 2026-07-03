@@ -31,8 +31,10 @@ jobs:
           # macOS Apple Silicon
           - os: macos-14
             macosx_deployment_target: "14.0"
-          # Windows x86_64
+          # Windows x86_64 (AMD64 only -- no 32-bit win32 wheels, which are in
+          # cibuildwheel's Windows `auto` set by default)
           - os: windows-latest
+            cibw_archs: AMD64
           # Windows on ARM (best effort)
           - os: windows-11-arm
             cibw_archs: ARM64
