@@ -41,6 +41,10 @@ ojph_module = Extension(
     sources=['ojph/ojph_bindings.cpp'],
     include_dirs=include_dirs,
     library_dirs=library_dirs,
+    # Requires OpenJPH containing PR #312 (COC segment overloads), which was
+    # merged after the 0.30.1 release. As of this writing that change is only
+    # available on OpenJPH `main` (unreleased); OpenJPH <= 0.30.1 will not
+    # compile. See CHANGELOG.md for details.
     libraries=['openjph'],
     extra_compile_args=[]
 )
