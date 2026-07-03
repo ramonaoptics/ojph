@@ -437,26 +437,29 @@ PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<param_cod>(m, "ParamCod")
         // .def(py::init<local::param_cod*>())
 
-        .def("set_num_decomposition", &param_cod::set_num_decomposition, py::arg("num_decompositions"))
-        .def("set_block_dims", &param_cod::set_block_dims, py::arg("width"), py::arg("height"))
-        .def("set_precinct_size", &param_cod::set_precinct_size, py::arg("num_levels"), py::arg("precinct_size"))
+        // OpenJPH >= 0.30.1 (post-release) added COC-segment overloads that take
+        // a leading comp_idx argument, so these COD-segment (no comp_idx) methods
+        // must be disambiguated with an explicit member-function-pointer cast.
+        .def("set_num_decomposition", static_cast<void (param_cod::*)(ui32)>(&param_cod::set_num_decomposition), py::arg("num_decompositions"))
+        .def("set_block_dims", static_cast<void (param_cod::*)(ui32, ui32)>(&param_cod::set_block_dims), py::arg("width"), py::arg("height"))
+        .def("set_precinct_size", static_cast<void (param_cod::*)(int, size*)>(&param_cod::set_precinct_size), py::arg("num_levels"), py::arg("precinct_size"))
         .def("set_progression_order", &param_cod::set_progression_order, py::arg("name"))
         .def("set_color_transform", &param_cod::set_color_transform, py::arg("color_transform"))
-        .def("set_reversible", &param_cod::set_reversible, py::arg("reversible"))
+        .def("set_reversible", static_cast<void (param_cod::*)(bool)>(&param_cod::set_reversible), py::arg("reversible"))
 
-        .def("get_num_decompositions", &param_cod::get_num_decompositions)
-        .def("get_block_dims", &param_cod::get_block_dims)
-        .def("get_log_block_dims", &param_cod::get_log_block_dims)
-        .def("is_reversible", &param_cod::is_reversible)
-        .def("get_precinct_size", &param_cod::get_precinct_size, py::arg("level_num"))
-        .def("get_log_precinct_size", &param_cod::get_log_precinct_size, py::arg("level_num"))
+        .def("get_num_decompositions", static_cast<ui32 (param_cod::*)() const>(&param_cod::get_num_decompositions))
+        .def("get_block_dims", static_cast<size (param_cod::*)() const>(&param_cod::get_block_dims))
+        .def("get_log_block_dims", static_cast<size (param_cod::*)() const>(&param_cod::get_log_block_dims))
+        .def("is_reversible", static_cast<bool (param_cod::*)() const>(&param_cod::is_reversible))
+        .def("get_precinct_size", static_cast<size (param_cod::*)(ui32) const>(&param_cod::get_precinct_size), py::arg("level_num"))
+        .def("get_log_precinct_size", static_cast<size (param_cod::*)(ui32) const>(&param_cod::get_log_precinct_size), py::arg("level_num"))
         .def("get_progression_order", &param_cod::get_progression_order)
         .def("get_progression_order_as_string", &param_cod::get_progression_order_as_string)
         .def("get_num_layers", &param_cod::get_num_layers)
         .def("is_using_color_transform", &param_cod::is_using_color_transform)
         .def("packets_may_use_sop", &param_cod::packets_may_use_sop)
         .def("packets_use_eph", &param_cod::packets_use_eph)
-        .def("get_block_vertical_causality", &param_cod::get_block_vertical_causality);
+        .def("get_block_vertical_causality", static_cast<bool (param_cod::*)() const>(&param_cod::get_block_vertical_causality));
 
     py::class_<param_qcd>(m, "ParamQcd")
         .def("set_irrev_quant", static_cast<void (param_qcd::*)(float)>(&param_qcd::set_irrev_quant), py::arg("delta"))

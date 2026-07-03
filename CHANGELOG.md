@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- Build against the latest OpenJPH. OpenJPH PR
+  [#312](https://github.com/aous72/OpenJPH/pull/312) ("Removes direct access to
+  COC segment marker") added COC-segment overloads to `ojph::param_cod`, which
+  made the unqualified member-function pointers used by the bindings ambiguous
+  and broke compilation. The affected `param_cod` `.def(...)` bindings are now
+  disambiguated with explicit `static_cast` to the COD (no `comp_idx`) overloads.
+  This change is backward-compatible and still compiles against older OpenJPH
+  where those methods are not overloaded.
+- Bump the minimum required OpenJPH to the version containing PR #312. That
+  change was merged after the 0.30.1 release and is, at the time of writing,
+  only available on OpenJPH `main` (unreleased). Building against OpenJPH 0.30.1
+  or earlier is no longer supported.
+
 ## [0.6.2] - 2026-02-20
 
 - Fix encoding errors associated with datatypes where the order is explicitely defined.
