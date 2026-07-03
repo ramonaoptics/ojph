@@ -14,7 +14,7 @@ using namespace ojph;
 
 PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<infile_base>(m, "InfileBase")
-        .def("read", &infile_base::read)
+        .def("read", &infile_base::read, py::call_guard<py::gil_scoped_release>())
         .def("seek", &infile_base::seek)
         .def("tell", &infile_base::tell)
         .def("eof", &infile_base::eof)
@@ -23,7 +23,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<j2c_infile, infile_base>(m, "J2CInfile")
         .def(py::init<>())
         .def("open", &j2c_infile::open)
-        .def("read", &j2c_infile::read)
+        .def("read", &j2c_infile::read, py::call_guard<py::gil_scoped_release>())
         .def("seek", [](infile_base& self, si64 offset, int origin) {
             return self.seek(offset, static_cast<enum infile_base::seek>(origin));
         })
@@ -51,6 +51,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
             if (buf.size < size) {
                 throw py::value_error("Buffer size is smaller than requested read size");
             }
+            py::gil_scoped_release release;
             return self.read(static_cast<void*>(buf.ptr), size);
         }, py::arg("buffer"), py::arg("size"))
         .def("seek", [](mem_infile& self, si64 offset, int origin) {
@@ -62,7 +63,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
 
 
     py::class_<outfile_base>(m, "outfileBase")
-        .def("write", &outfile_base::write)
+        .def("write", &outfile_base::write, py::call_guard<py::gil_scoped_release>())
         .def("seek", &outfile_base::seek)
         .def("tell", &outfile_base::tell)
         .def("close", &outfile_base::close);
@@ -70,14 +71,14 @@ PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<j2c_outfile, outfile_base>(m, "J2COutfile")
         .def(py::init<>())
         .def("open", &j2c_outfile::open)
-        .def("write", &j2c_outfile::write)
+        .def("write", &j2c_outfile::write, py::call_guard<py::gil_scoped_release>())
         .def("tell", &j2c_outfile::tell)
         .def("close", &j2c_outfile::close);
 
     py::class_<mem_outfile, outfile_base>(m, "MemOutfile")
         .def(py::init<>())
         .def("open", &mem_outfile::open, py::arg("initial_size") = 65536, py::arg("clear_mem") = false)
-        .def("write", &mem_outfile::write)
+        .def("write", &mem_outfile::write, py::call_guard<py::gil_scoped_release>())
         .def("tell", &mem_outfile::tell)
         .def("get_used_size", &mem_outfile::get_used_size)
         .def("get_buf_size", &mem_outfile::get_buf_size)
@@ -85,7 +86,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
             return self.seek(offset, static_cast<enum outfile_base::seek>(origin));
         })
         .def("close", &mem_outfile::close)
-        .def("write_to_file", &mem_outfile::write_to_file)
+        .def("write_to_file", &mem_outfile::write_to_file, py::call_guard<py::gil_scoped_release>())
         .def("get_data", [](mem_outfile& self) {
             const ui8* data = self.get_data();
             si64 size = self.tell();
@@ -106,6 +107,7 @@ PYBIND11_MODULE(ojph_bindings, m) {
              [](codestream &self, outfile_base *file, py::object comments, ui32 num_comments) {
                  // Check if the comments argument is None and convert it to nullptr if so
                  const comment_exchange* comments_ptr = comments.is_none() ? nullptr : comments.cast<const comment_exchange*>();
+                 py::gil_scoped_release release;
                  self.write_headers(file, comments_ptr, num_comments);
              },
              py::arg("file"), py::arg("comments") = py::none(), py::arg("num_comments") = 0)
@@ -233,11 +235,11 @@ PYBIND11_MODULE(ojph_bindings, m) {
                  }
              },
              py::arg("image"), py::arg("num_components"), py::arg("channel_order"))
-        .def("flush", &codestream::flush)
+        .def("flush", &codestream::flush, py::call_guard<py::gil_scoped_release>())
         .def("enable_resilience", &codestream::enable_resilience)
-        .def("read_headers", &codestream::read_headers)
+        .def("read_headers", &codestream::read_headers, py::call_guard<py::gil_scoped_release>())
         .def("restrict_input_resolution", &codestream::restrict_input_resolution)
-        .def("create", &codestream::create)
+        .def("create", &codestream::create, py::call_guard<py::gil_scoped_release>())
         .def("pull", &codestream::pull, py::call_guard<py::gil_scoped_release>())
         .def("pull_all_components",
              [](codestream &self, py::array output, ui32 num_components, const std::string& channel_order, py::object min_val_obj, py::object max_val_obj) {
