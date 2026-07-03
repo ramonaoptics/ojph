@@ -25,12 +25,18 @@ jobs:
           - os: ubuntu-latest
           # Linux aarch64 (native ARM runner -- no QEMU)
           - os: ubuntu-24.04-arm
-          # macOS Intel
-          - os: macos-13
-            macosx_deployment_target: "13.0"
-          # macOS Apple Silicon
+          # macOS Apple Silicon (arm64, native)
           - os: macos-14
+            cibw_archs: arm64
+            cmake_osx_architectures: arm64
             macosx_deployment_target: "14.0"
+          # macOS Intel (x86_64), cross-compiled on the Apple Silicon runner so
+          # we don't depend on the scarce/slow macos-13 Intel runners. clang
+          # cross-compiles x86_64 fine; the x86_64 test run (Rosetta) is skipped.
+          - os: macos-14
+            cibw_archs: x86_64
+            cmake_osx_architectures: x86_64
+            macosx_deployment_target: "13.0"
           # Windows x86_64 (AMD64 only -- no 32-bit win32 wheels, which are in
           # cibuildwheel's Windows `auto` set by default)
           - os: windows-latest
@@ -68,6 +74,10 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.cibw_archs || 'auto' }}
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macosx_deployment_target }}
+          # Target arch for the macOS OpenJPH build so it matches the extension
+          # (enables cross-compiling the x86_64 wheel on Apple Silicon). Ignored
+          # off macOS.
+          CMAKE_OSX_ARCHITECTURES: ${{ matrix.cmake_osx_architectures }}
 
       - uses: actions/upload-artifact@v4
         with:

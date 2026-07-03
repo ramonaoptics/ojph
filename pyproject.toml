@@ -27,10 +27,11 @@ test-requires = ["pytest", "numpy"]
 # uncompiled source tree ("No module named 'ojph.ojph_bindings'").
 test-sources = ["tests"]
 test-command = "pytest tests"
-# Skip tests where a runtime dependency (numpy) may not yet ship a matching
-# wheel: free-threaded interpreters and Windows/ARM64. The wheels themselves
-# are still built and published for these targets.
-test-skip = ["cp314t-*", "*-win_arm64"]
+# Skip tests we can't (reliably) run on the build host:
+#  - free-threaded interpreters and Windows/ARM64: numpy may not ship a wheel;
+#  - macosx_x86_64: cross-compiled on Apple Silicon, so it'd need Rosetta.
+# The wheels themselves are still built and published for these targets.
+test-skip = ["cp314t-*", "*-win_arm64", "*-macosx_x86_64"]
 
 [tool.cibuildwheel.linux]
 # manylinux containers don't ship CMake/Ninja; grab them from PyPI.
