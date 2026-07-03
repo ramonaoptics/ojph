@@ -53,14 +53,19 @@ jobs:
         if: runner.os != 'Linux'
         uses: lukka/get-cmake@latest
 
+      - name: Set up MSVC developer environment
+        # So the OpenJPH CMake/Ninja build uses cl.exe (matching the extension's
+        # MSVC toolchain/ABI) for the wheel's target architecture.
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.cibw_archs == 'ARM64' && 'arm64' || 'amd64' }}
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.1.0
         env:
           CIBW_ARCHS: ${{ matrix.cibw_archs || 'auto' }}
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macosx_deployment_target }}
-          # Architecture for the Windows (MSVC) OpenJPH build so it matches the
-          # extension's target. Ignored on non-Windows.
-          OJPH_MSVC_ARCH: ${{ matrix.cibw_archs == 'ARM64' && 'ARM64' || 'x64' }}
 
       - uses: actions/upload-artifact@v4
         with:

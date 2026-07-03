@@ -84,18 +84,22 @@ def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path) -> None:
         )
 
     if os.name == "nt":
-        # Force the Visual Studio (MSVC) generator so OpenJPH is compiled with
-        # the SAME toolchain/ABI as the Python extension (setuptools uses
-        # cl.exe). A Ninja build here silently picks up whatever compiler is
-        # first on PATH -- on the GitHub ARM64 image that produced a GNU-style
-        # ``libopenjph.a`` that MSVC cannot link. ``-A`` selects the target
-        # architecture (x64 or ARM64); the extension's arch is set by the
-        # CPython being built, so CI passes OJPH_MSVC_ARCH to match.
-        generator = os.environ.get("CMAKE_GENERATOR", "Visual Studio 17 2022")
+        # Build with Ninja driving MSVC's cl.exe, so OpenJPH uses the same
+        # toolchain/ABI as the Python extension (setuptools uses cl.exe) and
+        # produces an MSVC ``.lib``. This requires an active MSVC developer
+        # environment (CI sets one up with ilammy/msvc-dev-cmd); cl.exe is then
+        # first on PATH and Ninja auto-detects it. The target architecture comes
+        # from that environment, so no ``-A`` is needed. We avoid the default
+        # Visual Studio generator because it fails to locate a VS instance when
+        # invoked from this (non-developer-prompt) subprocess.
+        generator = os.environ.get("CMAKE_GENERATOR", "Ninja")
         args += ["-G", generator]
-        arch = os.environ.get("OJPH_MSVC_ARCH")
-        if arch and "Visual Studio" in generator:
-            args += ["-A", arch]
+        if not shutil.which("cl") and generator == "Ninja":
+            print(
+                "WARNING: cl.exe not found on PATH; the MSVC developer "
+                "environment may not be active.",
+                file=sys.stderr,
+            )
 
     run(args)
 
