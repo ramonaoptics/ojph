@@ -3,6 +3,18 @@
 #include <pybind11/numpy.h>
 #include <limits>
 #include <string>
+#include <cstdlib>
+#include <cstring>
+#include <cstdint>
+#include <new>
+
+#if defined(_WIN32)
+  #include <malloc.h>
+  #include <io.h>
+  #include <fcntl.h>
+#else
+  #include <unistd.h>
+#endif
 
 #include <openjph/ojph_file.h>
 #include <openjph/ojph_codestream.h>
@@ -11,6 +23,151 @@
 
 namespace py = pybind11;
 using namespace ojph;
+
+namespace {
+
+// Alignment used for read buffers. 4096 satisfies O_DIRECT sector alignment on
+// every platform we target and keeps buffers page/cache-line friendly for SIMD
+// decode paths.
+constexpr size_t OJPH_READ_ALIGN = 4096;
+
+inline size_t round_up(size_t v, size_t a) { return (v + a - 1) / a * a; }
+
+// Portable aligned allocation. The returned pointer must be released with
+// aligned_free(). Sized up to a multiple of ``align`` so O_DIRECT reads that
+// round their length up stay inside the allocation.
+inline void* aligned_read_alloc(size_t size, size_t align = OJPH_READ_ALIGN) {
+  size_t padded = round_up(size ? size : 1, align);
+#if defined(_WIN32)
+  return _aligned_malloc(padded, align);
+#else
+  void* p = nullptr;
+  if (posix_memalign(&p, align, padded) != 0)
+    return nullptr;
+  return p;
+#endif
+}
+
+inline void aligned_free(void* p) {
+#if defined(_WIN32)
+  _aligned_free(p);
+#else
+  std::free(p);
+#endif
+}
+
+// pread the full [offset, offset+count) region (looping over short reads for a
+// regular fd). For an O_DIRECT fd the caller passes an aligned buf/count/offset
+// and we issue a single call, tolerating a short tail at EOF.
+inline int64_t pread_region(int fd, void* buf, size_t count, int64_t offset,
+                            bool o_direct) {
+#if defined(_WIN32)
+  // Windows has no pread and no O_DIRECT; seek + read. Each read_j2c_fd_into
+  // call uses its own fd (opened per page by the caller), so the two sequential
+  // reads within a call do not race. Force binary mode so a caller who opened
+  // the fd in the CRT default (text) mode does not get CRLF translation or an
+  // early stop at a 0x1A byte in the binary codestream.
+  (void)o_direct;
+  _setmode(fd, _O_BINARY);
+  if (_lseeki64(fd, offset, SEEK_SET) < 0) return -1;
+  int r = _read(fd, buf, (unsigned int)count);
+  return (int64_t)r;
+#else
+  if (o_direct)
+    return (int64_t)::pread(fd, buf, count, (off_t)offset);
+  size_t done = 0;
+  while (done < count) {
+    ssize_t r = ::pread(fd, (char*)buf + done, count - done, (off_t)(offset + done));
+    if (r < 0) return (int64_t)r;
+    if (r == 0) break;  // EOF
+    done += (size_t)r;
+  }
+  return (int64_t)done;
+#endif
+}
+
+// Parse the TLM marker segment out of an already-read main header to find how
+// many bytes of the codestream are needed to reconstruct ``level`` (number of
+// finest resolutions skipped). Returns 0 if the TLM is absent or inconsistent,
+// in which case the caller reads the whole tile. Assumes RLCP with one tile-part
+// per resolution.
+inline size_t tlm_bytes_to_read(const ui8* buf, size_t header_size,
+                                ui32 num_decompositions, int level) {
+  size_t search = header_size < 200 ? header_size : 200;
+  size_t idx = SIZE_MAX;
+  for (size_t i = 0; i + 1 < search; ++i)
+    if (buf[i] == 0xFF && buf[i + 1] == 0x55) { idx = i; break; }
+  if (idx == SIZE_MAX) return 0;
+
+  const ui8* p = buf + idx + 2;                 // past the 0xFF55 marker
+  ui32 Ltlm = ((ui32)p[0] << 8) | p[1]; p += 2; // segment length
+  p += 1;                                       // Ztlm
+  ui8 Stlm = p[0]; p += 1;
+  int ST = (Stlm & 0x30) >> 4;
+  int Ttlm_bytes = (ST == 0) ? 0 : (ST == 1 ? 1 : 2);
+  int SP = (Stlm & 0x40) >> 6;
+  int Ptlm_bytes = (SP == 0) ? 2 : 4;
+  int per = Ttlm_bytes + Ptlm_bytes;
+  if (per == 0) return 0;
+  int num_tile_parts = (int)(Ltlm - 4) / per;
+  if (num_tile_parts != (int)num_decompositions + 1) return 0;
+
+  if (level < 0) level = 0;
+  if (level > (int)num_decompositions) level = (int)num_decompositions;
+  int target = num_tile_parts - 1 - level;      // cumulative index for this level
+
+  // Guard against reading past what we actually have in the header buffer.
+  const ui8* end = buf + header_size;
+  size_t cum = 0;
+  for (int i = 0; i <= target; ++i) {
+    if (p + per > end) return 0;
+    p += Ttlm_bytes;
+    size_t ptlm = 0;
+    for (int b = 0; b < Ptlm_bytes; ++b) ptlm = (ptlm << 8) | p[b];
+    p += Ptlm_bytes;
+    cum += ptlm;
+  }
+  return header_size + cum;
+}
+
+// Pull every decoded line of a single component into a 2D output buffer, with
+// optional clipping. Shared by read_j2c_into and read_j2c_fd_into. Must be
+// called with the GIL released.
+inline void pull_single_component_into(
+    codestream& cs, char* out_ptr, size_t rows, size_t cols,
+    size_t row_stride, size_t element_size, bool is_unsigned,
+    bool do_clip, si32 min_val, si32 max_val) {
+  ui32 comp = 0;
+  for (size_t r = 0; r < rows; ++r) {
+    line_buf* line = cs.pull(comp);
+    const si32* ld = line->i32;
+    char* dst = out_ptr + r * row_stride;
+    if (element_size == 1) {
+      for (size_t i = 0; i < cols; ++i) {
+        si32 v = ld[i];
+        if (do_clip) { if (v < min_val) v = min_val; if (v > max_val) v = max_val; }
+        if (is_unsigned) *reinterpret_cast<ui8*>(dst + i) = (ui8)v;
+        else             *reinterpret_cast<si8*>(dst + i) = (si8)v;
+      }
+    } else if (element_size == 2) {
+      for (size_t i = 0; i < cols; ++i) {
+        si32 v = ld[i];
+        if (do_clip) { if (v < min_val) v = min_val; if (v > max_val) v = max_val; }
+        if (is_unsigned) *reinterpret_cast<ui16*>(dst + i * 2) = (ui16)v;
+        else             *reinterpret_cast<si16*>(dst + i * 2) = (si16)v;
+      }
+    } else {
+      for (size_t i = 0; i < cols; ++i) {
+        si32 v = ld[i];
+        if (do_clip) { if (v < min_val) v = min_val; if (v > max_val) v = max_val; }
+        if (is_unsigned) *reinterpret_cast<ui32*>(dst + i * 4) = (ui32)v;
+        else             *reinterpret_cast<si32*>(dst + i * 4) = v;
+      }
+    }
+  }
+}
+
+}  // anonymous namespace
 
 PYBIND11_MODULE(ojph_bindings, m) {
     py::class_<infile_base>(m, "InfileBase")
@@ -401,6 +558,274 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("access_qcd", &codestream::access_qcd)
         .def("access_nlt", &codestream::access_nlt)
         .def("is_planar", &codestream::is_planar);
+
+    // -----------------------------------------------------------------------
+    // read_j2c_into: single-call, GIL-free reduced-resolution decode.
+    //
+    // Performs the ENTIRE read pipeline (open memory infile, parse headers,
+    // restrict to ``level`` skipped resolutions, create, and pull every line
+    // into ``out``) under one ``py::gil_scoped_release``. This is the key to
+    // letting a Python ThreadPoolExecutor actually parallelise many small
+    // reduced-resolution decodes: with the orchestration living in Python the
+    // threads serialise on the GIL, whereas here the GIL is released for the
+    // whole decode. Single-component (grayscale) uint8/uint16 only for now.
+    //
+    // ``data``  : compressed codestream bytes (a full or partial read; if
+    //             partial, the caller must have written an EOF marker).
+    // ``out``   : pre-allocated, C-contiguous 2D array at the level shape,
+    //             using the caller's own (aligned) allocator.
+    // ``level`` : number of finest resolutions to skip (0 == full res).
+    // Returns (height, width) actually decoded so the caller can slice.
+    // -----------------------------------------------------------------------
+    m.def("read_j2c_into",
+        [](py::array_t<ui8> data, py::array out, int level,
+           py::object min_val_obj, py::object max_val_obj)
+            -> std::pair<ui32, ui32> {
+            py::buffer_info in = data.request();
+            py::buffer_info ob = out.request();
+            if (ob.ndim != 2)
+                throw py::value_error("out must be 2-dimensional (single component)");
+            if (!(out.flags() & py::array::c_style))
+                throw py::value_error("out must be C-contiguous");
+
+            const ui8* data_ptr = static_cast<const ui8*>(in.ptr);
+            size_t data_size = (size_t)in.shape[0];
+            char* out_ptr = static_cast<char*>(ob.ptr);
+            size_t out_rows = (size_t)ob.shape[0];
+            size_t out_cols = (size_t)ob.shape[1];
+            size_t row_stride = (size_t)ob.strides[0];
+            size_t element_size = (size_t)ob.itemsize;
+
+            const std::string& fmt = ob.format;
+            char fc = fmt.empty() ? '\0'
+                : (fmt.size() > 1 && (fmt[0]=='<'||fmt[0]=='>'||fmt[0]=='='||fmt[0]=='|'))
+                    ? fmt[1] : fmt[0];
+            bool is_unsigned = (fc=='B'||fc=='H'||fc=='I'||fc=='L');
+
+            bool do_clip = !min_val_obj.is_none() && !max_val_obj.is_none();
+            si32 min_val = do_clip ? min_val_obj.cast<si32>() : 0;
+            si32 max_val = do_clip ? max_val_obj.cast<si32>() : 0;
+
+            ui32 h = 0, w = 0;
+            {
+                py::gil_scoped_release release;
+
+                mem_infile infile;
+                infile.open(data_ptr, data_size);
+                codestream cs;
+                cs.read_headers(&infile);
+                cs.restrict_input_resolution((ui32)level, (ui32)level);
+                param_siz siz = cs.access_siz();
+                h = siz.get_recon_height(0);
+                w = siz.get_recon_width(0);
+                bool shape_ok = ((size_t)h == out_rows && (size_t)w == out_cols);
+                if (shape_ok) {
+                    cs.create();
+                    pull_single_component_into(
+                        cs, out_ptr, out_rows, out_cols, row_stride,
+                        element_size, is_unsigned, do_clip, min_val, max_val);
+                }
+                cs.close();
+                if (!shape_ok)
+                    throw py::value_error("out shape does not match decoded level shape");
+            }
+            return std::make_pair(h, w);
+        },
+        py::arg("data"), py::arg("out"), py::arg("level"),
+        py::arg("min_val") = py::none(), py::arg("max_val") = py::none());
+
+    // -----------------------------------------------------------------------
+    // peek_j2c_fd: read just the main header of a codestream stored at
+    // [offset, offset+nbytes) in an open file descriptor and return the
+    // information a caller needs to size an output buffer:
+    //   (num_decompositions, height, width)  -- full-resolution extent.
+    // GIL-free apart from argument marshalling. Callers should cache the result
+    // per (device, inode, offset); the codestream header never changes.
+    // -----------------------------------------------------------------------
+    m.def("peek_j2c_fd",
+        [](int fd, int64_t offset, int64_t nbytes, bool o_direct)
+            -> py::tuple {
+            constexpr size_t PEEK = 65536;
+            ui32 nd = 0, h = 0, w = 0;
+            bool ok = false;
+            {
+                py::gil_scoped_release release;
+                size_t want = PEEK;
+                if ((size_t)nbytes < want)
+                    want = o_direct ? round_up((size_t)nbytes, OJPH_READ_ALIGN)
+                                    : (size_t)nbytes;
+                ui8* buf = (ui8*)aligned_read_alloc(want);
+                if (buf) {
+                    int64_t got = pread_region(fd, buf, want, offset, o_direct);
+                    if (got > 0) {
+                        mem_infile mf;
+                        mf.open(buf, (size_t)got);
+                        codestream cs;
+                        cs.read_headers(&mf);
+                        nd = cs.access_cod().get_num_decompositions();
+                        param_siz siz = cs.access_siz();
+                        h = siz.get_recon_height(0);
+                        w = siz.get_recon_width(0);
+                        cs.close();
+                        ok = true;
+                    }
+                    aligned_free(buf);
+                }
+            }
+            if (!ok)
+                throw py::value_error("peek_j2c_fd: failed to read codestream header");
+            return py::make_tuple(nd, h, w);
+        },
+        py::arg("fd"), py::arg("offset"), py::arg("nbytes"),
+        py::arg("o_direct") = false);
+
+    // -----------------------------------------------------------------------
+    // read_j2c_fd_into: the whole reduced-resolution read for one codestream,
+    // GIL-free, straight from a file descriptor.
+    //
+    // Under a single py::gil_scoped_release it: aligned-reads the header, parses
+    // the TLM to learn how many bytes ``level`` needs, aligned-reads exactly
+    // those bytes into an aligned buffer (falling back to the whole tile if the
+    // TLM is absent), writes the EOC marker, then decodes into ``out``. All I/O
+    // uses O_DIRECT-compatible aligned buffers/lengths when ``o_direct`` is set,
+    // so the caller's O_DIRECT fast path is preserved.
+    //
+    // ``out`` must be a pre-allocated C-contiguous 2D array at the level shape
+    // (use peek_j2c_fd + get_level_shape math, cached per file). Returns the
+    // decoded (height, width). Single-component uint8/uint16/int8/int16.
+    // -----------------------------------------------------------------------
+    m.def("read_j2c_fd_into",
+        [](int fd, int64_t offset, int64_t nbytes, py::array out, int level,
+           py::object min_val_obj, py::object max_val_obj, bool o_direct)
+            -> std::pair<ui32, ui32> {
+            py::buffer_info ob = out.request();
+            if (ob.ndim != 2)
+                throw py::value_error("out must be 2-dimensional (single component)");
+            if (!(out.flags() & py::array::c_style))
+                throw py::value_error("out must be C-contiguous");
+
+            char* out_ptr = static_cast<char*>(ob.ptr);
+            size_t out_rows = (size_t)ob.shape[0];
+            size_t out_cols = (size_t)ob.shape[1];
+            size_t row_stride = (size_t)ob.strides[0];
+            size_t element_size = (size_t)ob.itemsize;
+            const std::string& fmt = ob.format;
+            char fc = fmt.empty() ? '\0'
+                : (fmt.size() > 1 && (fmt[0]=='<'||fmt[0]=='>'||fmt[0]=='='||fmt[0]=='|'))
+                    ? fmt[1] : fmt[0];
+            bool is_unsigned = (fc=='B'||fc=='H'||fc=='I'||fc=='L');
+            bool do_clip = !min_val_obj.is_none() && !max_val_obj.is_none();
+            si32 min_val = do_clip ? min_val_obj.cast<si32>() : 0;
+            si32 max_val = do_clip ? max_val_obj.cast<si32>() : 0;
+
+            ui32 h = 0, w = 0;
+            const char* err = nullptr;
+            {
+                py::gil_scoped_release release;
+
+                // First read: enough to cover the main header plus, for a deep
+                // zoom-out, all the bytes that level actually needs -- so the
+                // common case is a SINGLE read and a SINGLE header parse. The
+                // codestream parsed here is reused to decode when the data fits.
+                constexpr size_t INITIAL = 65536;
+                size_t cap = (size_t)nbytes;
+                size_t first_len = INITIAL < cap ? INITIAL : cap;
+                if (o_direct) first_len = round_up(first_len, OJPH_READ_ALIGN);
+                ui8* buf = (ui8*)aligned_read_alloc(first_len + OJPH_READ_ALIGN);
+                if (!buf) {
+                    err = "read_j2c_fd_into: allocation failed";
+                } else {
+                    int64_t got = pread_region(fd, buf, first_len, offset, o_direct);
+                    if (got <= 0) {
+                        err = "read_j2c_fd_into: short read";
+                        aligned_free(buf);
+                    } else {
+                        size_t have = (size_t)got;
+                        mem_infile mf;
+                        mf.open(buf, have);
+                        codestream cs;
+                        cs.read_headers(&mf);
+                        ui32 nd = cs.access_cod().get_num_decompositions();
+                        size_t header_size = (size_t)mf.tell();
+                        size_t bytes_to_read =
+                            tlm_bytes_to_read(buf, header_size, nd, level);
+                        if (bytes_to_read == 0 || bytes_to_read > cap)
+                            bytes_to_read = cap;  // no/!TLM -> whole tile
+
+                        if (bytes_to_read <= have) {
+                            // Fast path: needed bytes are already in buf. Reuse
+                            // the codestream we just parsed -- no second read,
+                            // no second read_headers.
+                            buf[bytes_to_read - 2] = 0xFF;
+                            buf[bytes_to_read - 1] = 0xD9;
+                            cs.restrict_input_resolution((ui32)level, (ui32)level);
+                            param_siz siz = cs.access_siz();
+                            h = siz.get_recon_height(0);
+                            w = siz.get_recon_width(0);
+                            if ((size_t)h != out_rows || (size_t)w != out_cols)
+                                err = "out shape does not match decoded level shape";
+                            else {
+                                cs.create();
+                                pull_single_component_into(
+                                    cs, out_ptr, out_rows, out_cols, row_stride,
+                                    element_size, is_unsigned, do_clip,
+                                    min_val, max_val);
+                            }
+                            cs.close();
+                            aligned_free(buf);
+                        } else {
+                            // Shallow level: read the full extent this level
+                            // needs into a fresh buffer, then decode.
+                            cs.close();
+                            aligned_free(buf);
+                            size_t read_len = o_direct
+                                ? round_up(bytes_to_read, OJPH_READ_ALIGN)
+                                : bytes_to_read;
+                            ui8* dbuf =
+                                (ui8*)aligned_read_alloc(read_len + OJPH_READ_ALIGN);
+                            if (!dbuf) {
+                                err = "read_j2c_fd_into: allocation failed";
+                            } else {
+                                int64_t g2 = pread_region(fd, dbuf, read_len,
+                                                          offset, o_direct);
+                                if (g2 < (int64_t)bytes_to_read) {
+                                    err = "read_j2c_fd_into: short read";
+                                } else {
+                                    dbuf[bytes_to_read - 2] = 0xFF;
+                                    dbuf[bytes_to_read - 1] = 0xD9;
+                                    mem_infile mf2;
+                                    mf2.open(dbuf, bytes_to_read);
+                                    codestream cs2;
+                                    cs2.read_headers(&mf2);
+                                    cs2.restrict_input_resolution((ui32)level,
+                                                                  (ui32)level);
+                                    param_siz siz = cs2.access_siz();
+                                    h = siz.get_recon_height(0);
+                                    w = siz.get_recon_width(0);
+                                    if ((size_t)h != out_rows || (size_t)w != out_cols)
+                                        err = "out shape does not match decoded level shape";
+                                    else {
+                                        cs2.create();
+                                        pull_single_component_into(
+                                            cs2, out_ptr, out_rows, out_cols,
+                                            row_stride, element_size, is_unsigned,
+                                            do_clip, min_val, max_val);
+                                    }
+                                    cs2.close();
+                                }
+                                aligned_free(dbuf);
+                            }
+                        }
+                    }
+                }
+            }
+            if (err)
+                throw py::value_error(err);
+            return std::make_pair(h, w);
+        },
+        py::arg("fd"), py::arg("offset"), py::arg("nbytes"), py::arg("out"),
+        py::arg("level"), py::arg("min_val") = py::none(),
+        py::arg("max_val") = py::none(), py::arg("o_direct") = false);
 
     py::class_<point>(m, "Point")
         .def(py::init<ui32, ui32>(), py::arg("x") = 0, py::arg("y") = 0)  // Constructor with default args

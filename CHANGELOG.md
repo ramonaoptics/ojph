@@ -5,8 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-07-03
 
+- Add `read_j2c_into(data, out, level, min_val=None, max_val=None)`: a single,
+  GIL-free entry point that performs the whole reduced-resolution decode
+  (open / read headers / restrict resolution / create / pull) into a
+  caller-provided 2D buffer under one `py::gil_scoped_release`. This lets callers
+  decode many small images concurrently from a Python thread pool without
+  serialising on the GIL (a ~2.3x threaded speedup for viewport-sized reads).
+- Add `read_j2c_fd_into(fd, offset, nbytes, out, level, min_val, max_val,
+  o_direct)` and `peek_j2c_fd(fd, offset, nbytes, o_direct)`: perform the entire
+  reduced-resolution read straight from a file descriptor -- an aligned
+  (O_DIRECT-compatible) file read, a TLM-trimmed partial read, and the decode --
+  all under one `py::gil_scoped_release`, so a thread pool can run many tile
+  reads truly concurrently. A portable aligned allocator keeps the read buffers
+  sector-aligned; Windows is supported.
 - Build against the latest OpenJPH. OpenJPH PR
   [#312](https://github.com/aous72/OpenJPH/pull/312) ("Removes direct access to
   COC segment marker") added COC-segment overloads to `ojph::param_cod`, which
