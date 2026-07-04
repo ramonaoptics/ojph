@@ -1,3 +1,4 @@
+import glob
 import platform
 import sys
 import os
@@ -27,6 +28,56 @@ version, cmdclass = get_version_and_cmdclass("ojph")
 # Include the pybind11 include directory
 include_dirs = [pybind11.get_include()]
 library_dirs = []
+libraries = []
+extra_objects = []
+
+
+def _find_static_openjph(install_dir):
+    """Return (include_dir, static_archive_path) for a static OpenJPH install.
+
+    ``install_dir`` is a CMake install prefix produced by
+    ``tools/build_openjph.py``. Returns ``None`` if it does not look like one.
+    The static archive is linked via ``extra_objects`` rather than ``-lopenjph``
+    because OpenJPH names the archive after its version on MSVC
+    (``openjph.0.30.lib``), which ``-l`` / ``libraries=`` cannot locate.
+    """
+    include_dir = os.path.join(install_dir, 'include')
+    if not os.path.isdir(os.path.join(include_dir, 'openjph')):
+        return None
+    if platform.system() == 'Windows':
+        patterns = ('openjph*.lib',)
+    else:
+        patterns = ('libopenjph*.a',)
+    for libsubdir in ('lib', 'lib64'):
+        libdir = os.path.join(install_dir, libsubdir)
+        for pattern in patterns:
+            matches = sorted(glob.glob(os.path.join(libdir, pattern)))
+            if matches:
+                return include_dir, matches[0]
+    return None
+
+
+# When a static OpenJPH has been prebuilt (e.g. by CI via
+# tools/build_openjph.py), link it directly so the wheel is self-contained.
+# Otherwise fall back to linking a system/conda ``openjph`` shared library,
+# which is how the editable dev/test builds work.
+_install_dir = os.environ.get('OPENJPH_INSTALL_DIR')
+if not _install_dir:
+    _default = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'openjph-install')
+    if os.path.isdir(_default):
+        _install_dir = _default
+
+_static = _find_static_openjph(_install_dir) if _install_dir else None
+if _static is not None:
+    ojph_include_dir, ojph_archive = _static
+    print(f"setup.py: statically linking OpenJPH from {ojph_archive}")
+    include_dirs.append(ojph_include_dir)
+    extra_objects.append(ojph_archive)
+else:
+    # Link a system/conda OpenJPH shared library (>= 0.30.1). This is the path
+    # used by editable dev/test builds and by the conda-forge feedstock.
+    libraries.append('openjph')
 
 # Check for windows, add PREFIX/Library to the include dirs for compatibility with conda-forge
 # This doesn't really hurt...
@@ -36,17 +87,22 @@ if platform.system() == 'Windows':
     include_dirs.append(os.path.join(prefix, 'Library', 'include'))
     library_dirs.append(os.path.join(prefix, 'Library', 'lib'))
 
+# pybind11 (and OpenJPH's headers) require a modern C++ standard. Some
+# compilers -- notably AppleClang -- still default to an ancient standard when
+# none is given, so request C++17 explicitly rather than relying on the default.
+if platform.system() == 'Windows':
+    extra_compile_args = ['/std:c++17']
+else:
+    extra_compile_args = ['-std=c++17']
+
 ojph_module = Extension(
     'ojph.ojph_bindings',
     sources=['ojph/ojph_bindings.cpp'],
     include_dirs=include_dirs,
     library_dirs=library_dirs,
-    # Requires OpenJPH containing PR #312 (COC segment overloads), which was
-    # merged after the 0.30.1 release. As of this writing that change is only
-    # available on OpenJPH `main` (unreleased); OpenJPH <= 0.30.1 will not
-    # compile. See CHANGELOG.md for details.
-    libraries=['openjph'],
-    extra_compile_args=[]
+    libraries=libraries,
+    extra_objects=extra_objects,
+    extra_compile_args=extra_compile_args
 )
 
 setup(

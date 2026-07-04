@@ -28,10 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disambiguated with explicit `static_cast` to the COD (no `comp_idx`) overloads.
   This change is backward-compatible and still compiles against older OpenJPH
   where those methods are not overloaded.
-- Bump the minimum required OpenJPH to the version containing PR #312. That
-  change was merged after the 0.30.1 release and is, at the time of writing,
-  only available on OpenJPH `main` (unreleased). Building against OpenJPH 0.30.1
-  or earlier is no longer supported.
+- Require OpenJPH >= 0.30.1.
+- Ship binary wheels. CI (`.github/workflows/wheels.yml`) uses
+  [cibuildwheel](https://cibuildwheel.pypa.io/) to build a static OpenJPH
+  (`tools/build_openjph.py`) and statically link it into self-contained wheels
+  for CPython 3.12/3.13/3.14 (plus 3.14 free-threading) across Linux
+  (x86_64/aarch64), macOS (x86_64/arm64) and Windows (x86_64/ARM64). Building
+  against a system/conda OpenJPH shared library (e.g. the conda-forge feedstock)
+  is still supported and is the default when no prebuilt static OpenJPH is
+  present.
 
 ## [0.6.2] - 2026-02-20
 
