@@ -47,16 +47,18 @@ jobs:
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
-      - uses: proudust/gh-describe@v2
-        # id needed to generate the outputs
-        id: ghd
-      - name: Check outputs
+      - name: Compute version string
+        # Use `git describe --long` so miniver always receives the
+        # "<tag>-<distance>-g<sha>" form it can parse -- even when HEAD is
+        # exactly on a tag (distance 0). The previous gh-describe action returned
+        # the bare tag in that case, which miniver turned into the invalid
+        # version "unknown+g<tag>" and broke `pip install`. Written to
+        # $GITHUB_ENV so both the Unix and Windows steps pick it up.
+        shell: bash
         run: |
-          echo "describe  : ${{ steps.ghd.outputs.describe }}"
-          echo "tag       : ${{ steps.ghd.outputs.tag }}"
-          echo "distance  : ${{ steps.ghd.outputs.distance }}"
-          echo "sha       : ${{ steps.ghd.outputs.sha }}"
-          echo "short-sha : ${{ steps.ghd.outputs.short-sha }}"
+          describe="$(git describe --tags --long --always)"
+          echo "describe: $describe"
+          echo "OJPH_GIT_DESCRIBE=$describe" >> "$GITHUB_ENV"
       - uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
@@ -71,7 +73,6 @@ jobs:
           conda info
           conda list
           conda install --quiet compilers pybind11 numpy openjph setuptools pytest --yes
-          export OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
 
@@ -90,8 +91,6 @@ jobs:
           conda info
           conda list
           conda install --yes --quiet compilers pybind11 numpy openjph setuptools pytest git
-          set "OJPH_GIT_DESCRIBE=${{ steps.ghd.outputs.describe }}"
-          setx OJPH_GIT_DESCRIBE ${{ steps.ghd.outputs.describe }}
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
 
