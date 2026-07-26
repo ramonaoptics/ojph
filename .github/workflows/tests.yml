@@ -72,7 +72,15 @@ jobs:
         run: |
           conda info
           conda list
-          conda install --quiet compilers pybind11 numpy openjph setuptools pytest --yes
+          # Pin the GIL-enabled ABI. conda-forge ships both `cp314` and `cp314t`
+          # (free-threading) builds of python 3.14, and a bare `python=3.14` can
+          # resolve to either depending on the rest of the solve -- so without
+          # this, these jobs silently drift onto a free-threaded interpreter and
+          # duplicate the `free-threaded` job below. That one covers cp3XXt.
+          abi="cp$(echo '${{ matrix.python-version }}' | tr -d .)"
+          conda install --quiet --yes \
+            "python_abi=${{ matrix.python-version }}=*_$abi" \
+            compilers pybind11 numpy openjph setuptools pytest
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
 
@@ -90,7 +98,10 @@ jobs:
         run: |
           conda info
           conda list
-          conda install --yes --quiet compilers pybind11 numpy openjph setuptools pytest git
+          # See the Unix step: pin the GIL-enabled ABI so the interpreter under
+          # test matches the job name.
+          $abi = "cp" + "${{ matrix.python-version }}".Replace(".", "")
+          conda install --yes --quiet "python_abi=${{ matrix.python-version }}=*_$abi" compilers pybind11 numpy openjph setuptools pytest git
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
 
@@ -100,4 +111,81 @@ jobs:
         run: |
           pip check
           python -c "import ojph; print(ojph.__version__)"
+          pytest
+
+  free-threaded:
+    # Free-threaded (PEP 703) CPython -- the `cp314t` ABI. This is a separate
+    # job only because setup-miniconda's `python-version:` input cannot express
+    # an ABI; the selection itself is the same `python_abi` build-string pin the
+    # matrix above uses, just with the `t` suffix. Those are the two build
+    # strings conda-forge's python 3.14 migration produces (`3.14.* *_cp314` and
+    # `3.14.* *_cp314t`).
+    name: Free-threaded Python ${{ matrix.python-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: "ubuntu-latest"
+            installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+            python-version: "3.14"
+          - os: "macos-14"
+            installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh"
+            python-version: "3.14"
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+      - name: Compute version string
+        shell: bash
+        run: |
+          describe="$(git describe --tags --long --always)"
+          echo "describe: $describe"
+          echo "OJPH_GIT_DESCRIBE=$describe" >> "$GITHUB_ENV"
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          installer-url: ${{ matrix.installer-url }}
+          python-version: ${{ matrix.python-version }}
+          miniforge-variant: Miniforge3
+
+      - name: Install Dependencies
+        shell: bash -el {0}
+        run: |
+          conda info
+          # Pin the free-threaded ABI by build string. setup-miniconda has
+          # already created the environment with whichever ABI `python=3.14`
+          # happened to resolve to, so this may swap the interpreter -- conda
+          # handles that, and it is what makes the choice explicit rather than
+          # incidental.
+          abi="cp$(echo '${{ matrix.python-version }}' | tr -d .)t"
+          conda install --quiet --yes \
+            "python_abi=${{ matrix.python-version }}=*_$abi" \
+            compilers pybind11 numpy openjph setuptools pytest
+          conda list
+          python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
+          python -VV
+
+      - name: Verify the interpreter really is free-threaded
+        shell: bash -el {0}
+        # Guard against silently testing a GIL-enabled interpreter, which would
+        # make this whole job a duplicate of the 3.14 matrix entry above.
+        run: |
+          python -c "import sysconfig, sys; assert sysconfig.get_config_var('Py_GIL_DISABLED'), 'not a free-threaded build'; assert not sys._is_gil_enabled(), 'GIL is enabled before import'"
+
+      - name: Test Package
+        shell: bash -el {0}
+        # No PYTHON_GIL=0 here on purpose: the point is that importing the
+        # extension leaves the GIL disabled *by itself*. Forcing it off would
+        # hide a dropped py::mod_gil_not_used() declaration, which
+        # tests/test_free_threading.py asserts against.
+        run: |
+          pip check
+          python -c "import ojph, sys; print(ojph.__version__); print('GIL enabled:', sys._is_gil_enabled())"
           pytest

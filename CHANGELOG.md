@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-25
+
+- Support free-threaded (PEP 703) CPython. The extension now declares
+  `py::mod_gil_not_used()`, so importing it on a free-threaded interpreter
+  (3.13t/3.14t) leaves the GIL disabled. Previously the interpreter re-enabled
+  the GIL at import time with a `RuntimeWarning`, which silently undid the
+  benefit of running a free-threaded build. Building the extension requires
+  `pybind11 >= 2.13` for that API; older pybind11 still compiles, but the
+  resulting module re-enables the GIL as before.
+- Add `tests/test_free_threading.py`: asserts the GIL stays disabled after
+  import, and exercises the encode/decode paths from a barrier-synchronised
+  thread pool (shared read-only codestreams, `read_j2c_into`,
+  `read_j2c_fd_into`, file reads, and concurrent encoding). These tests run on
+  GIL-enabled builds too, where the hot paths are already concurrent thanks to
+  `py::gil_scoped_release`.
+- Test the free-threaded wheels in CI. `cp314t` was already being *built* by
+  cibuildwheel but its test run was skipped; numpy now ships `cp314t` wheels for
+  every target we test on, so the skip is gone. `.github/workflows/tests.yml`
+  also gained a `free-threaded` job covering Linux and macOS.
+- Select the interpreter ABI explicitly in CI, by `python_abi` build string
+  (`*_cp314` vs `*_cp314t`, the two builds conda-forge's python 3.14 migration
+  produces). conda-forge publishes both and a bare `python=3.14` resolves to
+  either depending on the rest of the solve, so the regular matrix jobs could
+  silently run on a free-threaded interpreter instead of the one named in the
+  matrix.
+- Advertise free-threading support with the
+  `Programming Language :: Python :: Free Threading :: 3 - Stable` classifier.
+
 ## [0.7.0] - 2026-07-03
 
 - Add `read_j2c_into(data, out, level, min_val=None, max_val=None)`: a single,
