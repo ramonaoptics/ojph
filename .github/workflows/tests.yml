@@ -114,20 +114,23 @@ jobs:
           pytest
 
   free-threaded:
-    # Free-threaded (PEP 703) CPython 3.14 -- the `cp314t` build. This is a
-    # separate job because setup-miniconda's `python-version:` input cannot
-    # select an ABI: `python=3.14` resolves to either the `cp314` or the
-    # `cp314t` build depending on the rest of the solve. Requesting the
-    # `python-freethreading` metapackage is what actually pins it.
-    name: Free-threaded Python 3.14 (${{ matrix.os }})
+    # Free-threaded (PEP 703) CPython -- the `cp314t` ABI. This is a separate
+    # job only because setup-miniconda's `python-version:` input cannot express
+    # an ABI; the selection itself is the same `python_abi` build-string pin the
+    # matrix above uses, just with the `t` suffix. Those are the two build
+    # strings conda-forge's python 3.14 migration produces (`3.14.* *_cp314` and
+    # `3.14.* *_cp314t`).
+    name: Free-threaded Python ${{ matrix.python-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: "ubuntu-latest"
             installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+            python-version: "3.14"
           - os: "macos-14"
             installer-url: "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh"
+            python-version: "3.14"
       fail-fast: false
 
     steps:
@@ -149,14 +152,21 @@ jobs:
         with:
           auto-update-conda: true
           installer-url: ${{ matrix.installer-url }}
+          python-version: ${{ matrix.python-version }}
           miniforge-variant: Miniforge3
-          activate-environment: ojph-freethreading
 
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
+          conda info
+          # Pin the free-threaded ABI by build string. setup-miniconda has
+          # already created the environment with whichever ABI `python=3.14`
+          # happened to resolve to, so this may swap the interpreter -- conda
+          # handles that, and it is what makes the choice explicit rather than
+          # incidental.
+          abi="cp$(echo '${{ matrix.python-version }}' | tr -d .)t"
           conda install --quiet --yes \
-            python-freethreading=3.14 \
+            "python_abi=${{ matrix.python-version }}=*_$abi" \
             compilers pybind11 numpy openjph setuptools pytest
           conda list
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check

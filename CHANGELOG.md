@@ -23,12 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test the free-threaded wheels in CI. `cp314t` was already being *built* by
   cibuildwheel but its test run was skipped; numpy now ships `cp314t` wheels for
   every target we test on, so the skip is gone. `.github/workflows/tests.yml`
-  also gained a `free-threaded` job that builds against conda-forge's
-  `python-freethreading` on Linux and macOS.
-- Pin the GIL-enabled ABI in the regular test matrix. conda-forge publishes both
-  `cp314` and `cp314t` builds of python 3.14 and a bare `python=3.14` can
-  resolve to either, so those jobs could silently run on a free-threaded
-  interpreter instead of the one named in the matrix.
+  also gained a `free-threaded` job covering Linux and macOS.
+- Select the interpreter ABI explicitly in CI, by `python_abi` build string
+  (`*_cp314` vs `*_cp314t`, the two builds conda-forge's python 3.14 migration
+  produces). conda-forge publishes both and a bare `python=3.14` resolves to
+  either depending on the rest of the solve, so the regular matrix jobs could
+  silently run on a free-threaded interpreter instead of the one named in the
+  matrix.
 - Advertise free-threading support with the
   `Programming Language :: Python :: Free Threading :: 3 - Stable` classifier.
 
