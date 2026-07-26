@@ -124,6 +124,14 @@ jobs:
       - name: Build sdist
         run: pipx run build --sdist
 
+      - name: Check the distribution metadata renders on PyPI
+        # The same `twine check` that pypa/gh-action-pypi-publish runs before it
+        # uploads. Running it here means a README that PyPI would reject fails on
+        # the pull request, rather than after a release tag has been pushed and
+        # every wheel has already been built. The metadata is identical in the
+        # wheels, so checking the sdist is enough.
+        run: pipx run twine check --strict dist/*.tar.gz
+
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-sdist
