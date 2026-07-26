@@ -169,7 +169,23 @@ inline void pull_single_component_into(
 
 }  // anonymous namespace
 
+// Declare that this module runs without the GIL, so a free-threaded CPython
+// (3.13t/3.14t) keeps the GIL disabled instead of silently re-enabling it at
+// import time with a RuntimeWarning. This is safe here because the module holds
+// no mutable global state: every binding works on per-instance or stack-local
+// C++ objects, and OpenJPH's lazily built lookup tables are guarded by
+// std::call_once. As everywhere else in Python, a *single* Codestream / infile /
+// outfile object must still not be shared across threads without external
+// synchronisation -- the guarantee is that independent objects in different
+// threads do not interfere.
+//
+// py::mod_gil_not_used() needs pybind11 >= 2.13. Building with an older
+// pybind11 still works; the module just falls back to re-enabling the GIL.
+#if defined(PYBIND11_VERSION_HEX) && PYBIND11_VERSION_HEX >= 0x020D0000
+PYBIND11_MODULE(ojph_bindings, m, py::mod_gil_not_used()) {
+#else
 PYBIND11_MODULE(ojph_bindings, m) {
+#endif
     py::class_<infile_base>(m, "InfileBase")
         .def("read", &infile_base::read, py::call_guard<py::gil_scoped_release>())
         .def("seek", &infile_base::seek)
