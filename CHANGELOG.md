@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matrix.
 - Advertise free-threading support with the
   `Programming Language :: Python :: Free Threading :: 3 - Stable` classifier.
+- Declare `long_description_content_type='text/markdown'`. The README has always
+  been Markdown, but without this PyPI parses it as reStructuredText and rejects
+  the upload once it contains anything that is not also valid RST -- such as a
+  fenced code block. `twine check --strict` now runs on every pull request, so
+  this fails there instead of after a release tag has been pushed.
 
 ## [0.7.0] - 2026-07-03
 

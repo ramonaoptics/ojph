@@ -111,6 +111,10 @@ setup(
     cmdclass=cmdclass,
     description='OpenJPH Bindings for Python and Numpy',
     long_description=readme,
+    # README.md is Markdown. Without this, PyPI (and `twine check`) fall back to
+    # reStructuredText and reject the upload as soon as the README contains
+    # anything that is not also valid RST -- a fenced code block, for instance.
+    long_description_content_type='text/markdown',
     url='https://github.com/ramonaoptics/ojph',
     author='Mark Harfouche',
     author_email='mark@ramonaoptics.com',
