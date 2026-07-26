@@ -56,7 +56,18 @@ jobs:
 
       - name: Compute version string
         shell: bash
-        run: echo "OJPH_GIT_DESCRIBE=$(git describe --tags --long --always)" >> "$GITHUB_ENV"
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # On a tag build, pin the version to the *pushed* tag. `git describe`
+            # is ambiguous when several tags share a commit (e.g. 0.8.0,
+            # 0.8.0rc2, 0.8.0rc3 all on one commit) and would otherwise label
+            # the wheels with the wrong tag. The "-0-g<sha>" suffix is the
+            # `git describe --long` shape miniver expects (distance 0 => the
+            # version is exactly the tag).
+            echo "OJPH_GIT_DESCRIBE=${GITHUB_REF_NAME}-0-g$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          else
+            echo "OJPH_GIT_DESCRIBE=$(git describe --tags --long --always)" >> "$GITHUB_ENV"
+          fi
 
       - name: Install CMake and Ninja (host)
         # The manylinux container gets these via pip in CIBW before-all; on the
@@ -97,7 +108,18 @@ jobs:
 
       - name: Compute version string
         shell: bash
-        run: echo "OJPH_GIT_DESCRIBE=$(git describe --tags --long --always)" >> "$GITHUB_ENV"
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # On a tag build, pin the version to the *pushed* tag. `git describe`
+            # is ambiguous when several tags share a commit (e.g. 0.8.0,
+            # 0.8.0rc2, 0.8.0rc3 all on one commit) and would otherwise label
+            # the wheels with the wrong tag. The "-0-g<sha>" suffix is the
+            # `git describe --long` shape miniver expects (distance 0 => the
+            # version is exactly the tag).
+            echo "OJPH_GIT_DESCRIBE=${GITHUB_REF_NAME}-0-g$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          else
+            echo "OJPH_GIT_DESCRIBE=$(git describe --tags --long --always)" >> "$GITHUB_ENV"
+          fi
 
       - name: Build sdist
         run: pipx run build --sdist
