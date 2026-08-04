@@ -339,10 +339,10 @@ class OJPHImageFile:
                 raise ValueError(
                     f"dtype mismatch. out was provided with {out.dtype} but it must be {self._dtype}"
                 )
-            # Potentially collapse any additional dimensions
-            # do not use reshape since reshape can return a copy
-            image = out.view()
-            image.shape = shape
+            # Potentially collapse any additional dimensions.
+            # copy=False (numpy >= 2.1) makes numpy raise instead of silently
+            # returning a copy: we must decode into the caller's buffer.
+            image = np.reshape(out, shape, copy=False)
 
 
         if self._dtype in [np.uint32, np.int32]:

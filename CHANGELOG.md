@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-08-04
+
+- Reshape a caller-supplied `out` buffer with `np.reshape(..., copy=False)`
+  instead of assigning to `image.shape`, which numpy has deprecated. `copy=False`
+  keeps the guarantee we relied on: numpy raises rather than quietly handing back
+  a reshaped *copy* that we would decode into instead of the caller's buffer.
+  This requires `numpy >= 2.1`, which is now the minimum version.
+
 ## [0.9.0] - 2026-07-25
 
 - Support free-threaded (PEP 703) CPython. The extension now declares
