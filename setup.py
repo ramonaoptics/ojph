@@ -136,7 +136,8 @@ setup(
     packages=find_packages(exclude=["tests*"]),
     python_requires='>=3.12',
     install_requires=[
-        'numpy>=1.24.0',
+        # np.reshape(..., copy=False) is used in ojph/_imread.py
+        'numpy>=2.1',
     ],
     license_files=('LICENSE.txt',),
     ext_modules=[ojph_module],
