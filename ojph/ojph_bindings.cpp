@@ -16,10 +16,10 @@
   #include <unistd.h>
 #endif
 
-#include <openjph/ojph_file.h>
-#include <openjph/ojph_codestream.h>
-#include <openjph/ojph_mem.h>
-#include <openjph/ojph_params.h>
+#include <ojph/ojph_file.h>
+#include <ojph/ojph_codestream.h>
+#include <ojph/ojph_mem.h>
+#include <ojph/ojph_params.h>
 
 namespace py = pybind11;
 using namespace ojph;

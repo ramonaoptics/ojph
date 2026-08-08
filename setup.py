@@ -42,12 +42,12 @@ def _find_static_openjph(install_dir):
     (``openjph.0.30.lib``), which ``-l`` / ``libraries=`` cannot locate.
     """
     include_dir = os.path.join(install_dir, 'include')
-    if not os.path.isdir(os.path.join(include_dir, 'openjph')):
+    if not os.path.isdir(os.path.join(include_dir, 'ojph')):
         return None
     if platform.system() == 'Windows':
-        patterns = ('openjph*.lib',)
+        patterns = ('ojph*.lib',)
     else:
-        patterns = ('libopenjph*.a',)
+        patterns = ('libojph*.a',)
     for libsubdir in ('lib', 'lib64'):
         libdir = os.path.join(install_dir, libsubdir)
         for pattern in patterns:
@@ -75,9 +75,10 @@ if _static is not None:
     include_dirs.append(ojph_include_dir)
     extra_objects.append(ojph_archive)
 else:
-    # Link a system/conda OpenJPH shared library (>= 0.30.1). This is the path
-    # used by editable dev/test builds and by the conda-forge feedstock.
-    libraries.append('openjph')
+    # Link a system/conda ojph shared library (the ojph fork of OpenJPH,
+    # which is co-installable with upstream OpenJPH). This is the path used
+    # by editable dev/test builds.
+    libraries.append('ojph')
 
 # Check for windows, add PREFIX/Library to the include dirs for compatibility with conda-forge
 # This doesn't really hurt...

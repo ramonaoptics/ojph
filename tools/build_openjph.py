@@ -32,8 +32,8 @@ from pathlib import Path
 
 # Pinned to a released OpenJPH tag (>= 0.30.1, the minimum the bindings need)
 # so the wheels are reproducible. Bump it deliberately, not automatically.
-DEFAULT_GIT_URL = "https://github.com/aous72/OpenJPH.git"
-DEFAULT_GIT_REF = "0.30.1"
+DEFAULT_GIT_URL = "https://github.com/hmaarrfk/OpenJPH.git"
+DEFAULT_GIT_REF = "ojph"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -156,7 +156,7 @@ def main() -> int:
         if libdir.is_dir():
             found += [p for p in libdir.iterdir()
                       if p.suffix in (".a", ".lib")]
-    incdir = prefix / "include" / "openjph"
+    incdir = prefix / "include" / "ojph"
     print(f"Installed headers present: {incdir.is_dir()}", flush=True)
     print(f"Installed static libs: {[str(p) for p in found]}", flush=True)
     if not found:
