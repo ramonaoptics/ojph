@@ -28,6 +28,7 @@ version, cmdclass = get_version_and_cmdclass("ojph")
 # Include the pybind11 include directory
 include_dirs = [pybind11.get_include()]
 library_dirs = []
+runtime_library_dirs = []
 libraries = []
 extra_objects = []
 
@@ -57,16 +58,12 @@ def _find_static_openjph(install_dir):
     return None
 
 
-# When a static OpenJPH has been prebuilt (e.g. by CI via
-# tools/build_openjph.py), link it directly so the wheel is self-contained.
-# Otherwise fall back to linking a system/conda ``openjph`` shared library,
-# which is how the editable dev/test builds work.
+# The shared ojph library is the primary use case: link -lojph from the
+# active environment (e.g. a conda env where the ojph fork of OpenJPH is
+# installed next to upstream libopenjph). A static build is only used
+# when OPENJPH_INSTALL_DIR is set explicitly, which the wheel-building CI
+# does via tools/build_openjph.py.
 _install_dir = os.environ.get('OPENJPH_INSTALL_DIR')
-if not _install_dir:
-    _default = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            'openjph-install')
-    if os.path.isdir(_default):
-        _install_dir = _default
 
 _static = _find_static_openjph(_install_dir) if _install_dir else None
 if _static is not None:
@@ -75,10 +72,17 @@ if _static is not None:
     include_dirs.append(ojph_include_dir)
     extra_objects.append(ojph_archive)
 else:
-    # Link a system/conda ojph shared library (the ojph fork of OpenJPH,
-    # which is co-installable with upstream OpenJPH). This is the path used
-    # by editable dev/test builds.
+    # Link the shared ojph library (the ojph fork of OpenJPH, which is
+    # co-installable with upstream OpenJPH). When building inside a conda
+    # environment, point the compiler and the runtime loader at its
+    # lib/include explicitly, so the build works with a non-conda compiler
+    # as well.
     libraries.append('ojph')
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix:
+        include_dirs.append(os.path.join(conda_prefix, 'include'))
+        library_dirs.append(os.path.join(conda_prefix, 'lib'))
+        runtime_library_dirs.append(os.path.join(conda_prefix, 'lib'))
 
 # Check for windows, add PREFIX/Library to the include dirs for compatibility with conda-forge
 # This doesn't really hurt...
@@ -107,6 +111,7 @@ ojph_module = Extension(
     sources=['ojph/ojph_bindings.cpp'],
     include_dirs=include_dirs,
     library_dirs=library_dirs,
+    runtime_library_dirs=runtime_library_dirs,
     libraries=libraries,
     extra_objects=extra_objects,
     extra_compile_args=extra_compile_args
