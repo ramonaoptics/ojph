@@ -58,12 +58,17 @@ def _find_static_openjph(install_dir):
     return None
 
 
-# The shared ojph library is the primary use case: link -lojph from the
-# active environment (e.g. a conda env where the ojph fork of OpenJPH is
-# installed next to upstream libopenjph). A static build is only used
-# when OPENJPH_INSTALL_DIR is set explicitly, which the wheel-building CI
-# does via tools/build_openjph.py.
+# The primary configuration statically links the ojph fork of OpenJPH,
+# built from the subprojects/ojph submodule by tools/build_openjph.py
+# into ./openjph-install; the extension is then self-contained and fast,
+# with no runtime library to locate. Linking a shared libojph from the
+# environment remains available as a fallback for development setups.
 _install_dir = os.environ.get('OPENJPH_INSTALL_DIR')
+if not _install_dir:
+    _default = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'openjph-install')
+    if os.path.isdir(_default):
+        _install_dir = _default
 
 _static = _find_static_openjph(_install_dir) if _install_dir else None
 if _static is not None:

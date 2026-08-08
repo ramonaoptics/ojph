@@ -1,0 +1,4 @@
+[submodule "subprojects/ojph"]
+	path = subprojects/ojph
+	url = https://github.com/hmaarrfk/OpenJPH.git
+	branch = ojph

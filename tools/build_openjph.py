@@ -43,8 +43,11 @@ def run(cmd, **kwargs):
     subprocess.run([str(c) for c in cmd], check=True, **kwargs)
 
 
+SUBMODULE_DIR = PROJECT_ROOT / "subprojects" / "ojph"
+
+
 def clone(source_dir: Path, url: str, ref: str) -> None:
-    if (source_dir / ".git").is_dir():
+    if (source_dir / ".git").is_dir() or (source_dir / ".git").is_file():
         print(f"Reusing existing OpenJPH checkout at {source_dir}", flush=True)
     else:
         if source_dir.exists():
@@ -94,6 +97,11 @@ def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path) -> None:
         # invoked from this (non-developer-prompt) subprocess.
         generator = os.environ.get("CMAKE_GENERATOR", "Ninja")
         args += ["-G", generator]
+        # Pin both compilers to cl.exe. Conda-forge's `compilers` package now
+        # ships clang on Windows, and with the conda env on PATH CMake would
+        # otherwise pick clang for C and cl for CXX and reject the mix.
+        if shutil.which("cl"):
+            args += ["-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=cl"]
         if not shutil.which("cl") and generator == "Ninja":
             print(
                 "WARNING: cl.exe not found on PATH; the MSVC developer "
@@ -124,8 +132,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--source-dir",
-        default=str(PROJECT_ROOT / "build" / "openjph-src"),
-        help="where to clone the OpenJPH sources",
+        default=None,
+        help="OpenJPH sources; defaults to the subprojects/ojph submodule "
+             "when present, else a fresh clone under build/openjph-src",
     )
     parser.add_argument(
         "--jobs", type=int, default=os.cpu_count() or 2,
@@ -134,15 +143,27 @@ def main() -> int:
     args = parser.parse_args()
 
     prefix = Path(args.prefix).resolve()
-    source_dir = Path(args.source_dir).resolve()
-    build_dir = source_dir.parent / "openjph-build"
+    if args.source_dir is not None:
+        source_dir = Path(args.source_dir).resolve()
+    elif (SUBMODULE_DIR / "CMakeLists.txt").is_file():
+        source_dir = SUBMODULE_DIR
+    elif (PROJECT_ROOT / ".gitmodules").is_file():
+        # submodule declared but not initialized
+        run(["git", "-C", PROJECT_ROOT, "submodule", "update", "--init",
+             "--depth", "1", str(SUBMODULE_DIR)])
+        source_dir = SUBMODULE_DIR
+    else:
+        source_dir = (PROJECT_ROOT / "build" / "openjph-src").resolve()
+    build_dir = PROJECT_ROOT / "build" / "openjph-build"
 
     url = os.environ.get("OPENJPH_GIT_URL", DEFAULT_GIT_URL)
     ref = os.environ.get("OPENJPH_GIT_REF", DEFAULT_GIT_REF)
 
-    print(f"Building OpenJPH {ref}\n  from   {url}\n  into   {prefix}", flush=True)
+    print(f"Building OpenJPH\n  from   {source_dir}\n  into   {prefix}",
+          flush=True)
 
-    clone(source_dir, url, ref)
+    if source_dir != SUBMODULE_DIR:
+        clone(source_dir, url, ref)
     # Reconfigure from scratch so stale cache (e.g. a prior arch) never leaks in.
     if build_dir.exists():
         shutil.rmtree(build_dir)

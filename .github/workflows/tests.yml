@@ -43,6 +43,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
       - name: Configure Git
         run: |
           git config --global user.email "action@github.com"
@@ -80,7 +81,8 @@ jobs:
           abi="cp$(echo '${{ matrix.python-version }}' | tr -d .)"
           conda install --quiet --yes \
             "python_abi=${{ matrix.python-version }}=*_$abi" \
-            compilers pybind11 numpy openjph setuptools pytest
+            compilers pybind11 numpy setuptools pytest cmake ninja
+          python tools/build_openjph.py
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
 
@@ -92,6 +94,13 @@ jobs:
           python -c "import ojph; print(ojph.__version__)"
           pytest
 
+      - name: Set up MSVC developer environment (Windows)
+        if: matrix.os == 'windows-latest'
+        # tools/build_openjph.py drives MSVC's cl.exe through Ninja and
+        # needs the developer environment active (same as the wheel builds,
+        # which get it from cibuildwheel).
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install Dependencies (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -101,7 +110,8 @@ jobs:
           # See the Unix step: pin the GIL-enabled ABI so the interpreter under
           # test matches the job name.
           $abi = "cp" + "${{ matrix.python-version }}".Replace(".", "")
-          conda install --yes --quiet "python_abi=${{ matrix.python-version }}=*_$abi" compilers pybind11 numpy openjph setuptools pytest git
+          conda install --yes --quiet "python_abi=${{ matrix.python-version }}=*_$abi" compilers pybind11 numpy setuptools pytest git cmake ninja
+          python tools/build_openjph.py
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
 
@@ -137,6 +147,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
       - name: Configure Git
         run: |
           git config --global user.email "action@github.com"
@@ -167,8 +178,9 @@ jobs:
           abi="cp$(echo '${{ matrix.python-version }}' | tr -d .)t"
           conda install --quiet --yes \
             "python_abi=${{ matrix.python-version }}=*_$abi" \
-            compilers pybind11 numpy openjph setuptools pytest
+            compilers pybind11 numpy setuptools pytest cmake ninja
           conda list
+          python tools/build_openjph.py
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python -VV
 
