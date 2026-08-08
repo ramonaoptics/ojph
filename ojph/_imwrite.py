@@ -2,7 +2,16 @@ import numpy as np
 import inspect
 from collections.abc import Buffer
 
+from ._rev13 import declare_rev13_wavelet
 from .ojph_bindings import Codestream, J2COutfile, MemOutfile, Point
+
+# The wavelet kernels ``imwrite`` accepts, and whether each one is reversible.
+# 'irv97' and 'rev53' are the Part 1 kernels, which ``reversible=`` has always
+# selected between. 'rev13' is the reversible predict-only kernel: every
+# decomposition's low-pass subband is the even-indexed samples of the previous
+# resolution, untouched, so decoding ``level=r`` returns exactly
+# ``image[::2**r, ::2**r]``.
+_VALID_WAVELETS = {'irv97': False, 'rev53': True, 'rev13': True}
 
 
 class CompressedData(Buffer):
@@ -29,37 +38,55 @@ class CompressedData(Buffer):
         return self._memoryview
 
 
+def _encode_to_bytes(image, *, codestream=None, wavelet=None, **kwargs):
+    """Encode into memory and return the finished codestream as bytes."""
+    mem_outfile = MemOutfile()
+    mem_outfile.open(65536, False)
+    close_codestream = codestream is None
+    if close_codestream:
+        codestream = Codestream()
+    imwrite(
+        mem_outfile,
+        image,
+        codestream=codestream,
+        wavelet=wavelet,
+        **kwargs,
+    )
+    data = bytes(mem_outfile.get_data())
+    if close_codestream:
+        codestream.close()
+    mem_outfile.close()
+    if wavelet is not None and wavelet.lower() == 'rev13':
+        # The encoder ran rev13, but the header it wrote still says 5/3.
+        data = declare_rev13_wavelet(data)
+    return data
+
+
 def imwrite_to_memory(
     image,
     *,
     channel_order=None,
     num_decompositions=None,
     reversible=None,
+    wavelet=None,
     qstep=None,
     progression_order=None,
     tlm_marker=True,
     tileparts_at_resolutions=None,
     tileparts_at_components=None,
 ):
-    mem_outfile = MemOutfile()
-    mem_outfile.open(65536, False)
-    codestream = Codestream()
-    imwrite(
-        mem_outfile,
+    data = _encode_to_bytes(
         image,
         channel_order=channel_order,
-        codestream=codestream,
         num_decompositions=num_decompositions,
         reversible=reversible,
+        wavelet=wavelet,
         qstep=qstep,
         progression_order=progression_order,
         tlm_marker=tlm_marker,
         tileparts_at_resolutions=tileparts_at_resolutions,
         tileparts_at_components=tileparts_at_components,
     )
-    data = bytes(mem_outfile.get_data())
-    codestream.close()
-    mem_outfile.close()
     return np.frombuffer(data, dtype=np.uint8)
 
 
@@ -71,6 +98,7 @@ def imwrite(
     codestream=None,
     num_decompositions=None,
     reversible=None,
+    wavelet=None,
     qstep=None,
     progression_order=None,
     tlm_marker=True,
@@ -99,6 +127,47 @@ def imwrite(
             f"Invalid channel_order '{channel_order}'. "
             f"Must be one of: {', '.join(valid_orders)}"
         )
+
+    if wavelet is not None:
+        wavelet = wavelet.lower()
+        if wavelet not in _VALID_WAVELETS:
+            raise ValueError(
+                f"Invalid wavelet '{wavelet}'. "
+                f"Must be one of: {', '.join(sorted(_VALID_WAVELETS))}"
+            )
+        if reversible is None:
+            reversible = _VALID_WAVELETS[wavelet]
+        elif reversible != _VALID_WAVELETS[wavelet]:
+            raise ValueError(
+                f"The wavelet '{wavelet}' is "
+                f"{'reversible' if _VALID_WAVELETS[wavelet] else 'irreversible'}"
+                f", which contradicts reversible={reversible}."
+            )
+    if reversible is None:
+        reversible = True
+
+    if wavelet == 'rev13' and not isinstance(filename, MemOutfile):
+        # rev13 declares itself through main-header edits that can only be made
+        # once the codestream is complete (see ojph/_rev13.py), so build it in
+        # memory and write the finished bytes out. Passing a MemOutfile in
+        # directly encodes straight into it and skips that step, which is how
+        # _encode_to_bytes drives this function.
+        data = _encode_to_bytes(
+            image,
+            channel_order=channel_order,
+            codestream=codestream,
+            num_decompositions=num_decompositions,
+            reversible=reversible,
+            wavelet=wavelet,
+            qstep=qstep,
+            progression_order=progression_order,
+            tlm_marker=tlm_marker,
+            tileparts_at_resolutions=tileparts_at_resolutions,
+            tileparts_at_components=tileparts_at_components,
+        )
+        with open(filename, 'wb') as f:
+            f.write(data)
+        return
 
     if isinstance(filename, MemOutfile):
         ojph_file = filename
@@ -142,8 +211,6 @@ def imwrite(
             f"Must be one of: {', '.join(sorted(valid_progressions))}"
         )
     cod.set_progression_order(progression_order)
-    if reversible is None:
-        reversible = True
     cod.set_reversible(reversible)
     cod.set_color_transform(False)
     if num_decompositions is not None:
@@ -159,6 +226,12 @@ def imwrite(
     codestream.request_tlm_marker(tlm_marker)
 
     codestream.write_headers(ojph_file, None, 0)
+    if wavelet == 'rev13':
+        # Swap the 5/3 analysis kernel the header was written for out for
+        # rev13. write_headers() is what linked the kernel to COD, and no
+        # sample has been transformed yet, so this is the one window in which
+        # it can be done.
+        codestream.install_rev13_wavelet()
 
     # For native byte orders, even if the byte order of the input is
     # explicitely set

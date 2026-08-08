@@ -110,6 +110,8 @@ class OJPHImageFile:
         cod = self._codestream.access_cod()
         self._num_decompositions = cod.get_num_decompositions()
         self._progression_order = cod.get_progression_order_as_string()
+        self._is_predict_only = cod.is_predict_only()
+        self._reversible = cod.is_reversible()
 
         if self._channel_order is None:
             if cod.is_using_color_transform():
@@ -181,6 +183,8 @@ class OJPHImageFile:
         cod = instance._codestream.access_cod()
         instance._num_decompositions = cod.get_num_decompositions()
         instance._progression_order = cod.get_progression_order_as_string()
+        instance._is_predict_only = cod.is_predict_only()
+        instance._reversible = cod.is_reversible()
 
         if instance._channel_order is None:
             if cod.is_using_color_transform():
@@ -229,6 +233,26 @@ class OJPHImageFile:
     @property
     def progression_order(self):
         return self._progression_order
+
+    @property
+    def reversible(self):
+        """Whether the codestream uses a reversible (lossless) wavelet."""
+        return self._reversible
+
+    @property
+    def levels_are_exact_subsampling(self):
+        """Whether ``read(level=r)`` returns exactly ``image[::2**r, ::2**r]``.
+
+        True for a losslessly coded image whose wavelet kernel has no effective
+        update step, so every decomposition's low-pass subband holds the
+        even-indexed samples of the previous resolution untouched. That is what
+        ``imwrite(..., wavelet='rev13')`` produces, and it is what label/mask
+        images need: no interpolation, and no values absent from the original.
+
+        Decided from the lifting steps the codestream signals, not from how it
+        was written, so it is also correct for streams from other encoders.
+        """
+        return self._reversible and self._is_predict_only
 
     def get_level_shape(self, level):
         """Get the image shape at a specific decomposition level.

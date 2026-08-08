@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Add `wavelet=` to `imwrite` / `imwrite_to_memory`, accepting `'irv97'`,
+  `'rev53'` (the Part 1 kernels, previously selected through `reversible=`),
+  and the new `'rev13'`: a reversible predict-only kernel (the 5/3 kernel
+  with a null update step) signaled with a JPEG 2000 Part 2 ATK marker
+  segment. With `'rev13'`, the low-pass subband of every decomposition holds
+  the even-indexed samples of the previous resolution untouched, so
+  `imread(..., level=r)` returns exactly `image[::2**r, ::2**r]` — no
+  interpolation, no overshoot, and no values absent from the original image —
+  while full-resolution decoding remains lossless. This is designed for
+  label/mask images where in-between values are illegal, and on those it also
+  compresses ~30% better than `'rev53'`.
+
+  Encoding needs no OpenJPH changes: the encoder-side pieces upstream OpenJPH
+  is still missing (see https://github.com/aous72/OpenJPH/issues/261) are
+  carried in this package instead, so a stock OpenJPH >= 0.30 is enough. The
+  codestreams produced are ordinary HTJ2K and decode with any stock OpenJPH,
+  including previously published `ojph` wheels. `wavelet='rev13'` builds the
+  codestream in memory before writing it out, because the ATK marker segment
+  is spliced into the main header once encoding is done.
+
+- Add `OJPHImageFile.levels_are_exact_subsampling`, true when reading a level
+  returns exactly `image[::2**r, ::2**r]`, and `OJPHImageFile.reversible`. The
+  first is decided from the lifting steps the codestream signals rather than
+  from the wavelet kernel's index — a Part 2 index is file-local and carries no
+  meaning of its own — so it is also correct for codestreams from other
+  encoders. `ParamCod.is_predict_only()` exposes the same test.
+
 ## [0.9.1] - 2026-08-04
 
 - Reshape a caller-supplied `out` buffer with `np.reshape(..., copy=False)`

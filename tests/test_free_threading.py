@@ -245,6 +245,32 @@ def test_concurrent_encode_only(tmp_path):
         assert len(bytes(reference)) == sizes[0]
 
 
+def test_concurrent_rev13_encode():
+    """rev13 rewrites the wavelet kernel of a live codestream mid-encode.
+
+    That object belongs to one Codestream, so concurrent encodes must not see
+    each other's kernel; a thread that did would produce a stream whose header
+    and transform disagree, and the round-trip below would not be an exact
+    subsample.
+    """
+    rng = np.random.default_rng(13)
+    images = [
+        rng.integers(0, 256, size=(64 + 8 * i, 96), dtype=np.uint8)
+        for i in range(NUM_THREADS)
+    ]
+
+    def work(i):
+        for _ in range(ITERATIONS):
+            data = _encode(images[i], wavelet='rev13')
+            np.testing.assert_array_equal(
+                imread_from_memory(data), images[i])
+            np.testing.assert_array_equal(
+                imread_from_memory(data, level=2), images[i][::4, ::4])
+        return len(data)
+
+    _run_concurrently(work)
+
+
 def test_concurrent_mixed_read_and_write():
     """Readers and writers running at the same time, sharing nothing."""
     rng = np.random.default_rng(6)
