@@ -350,7 +350,9 @@ class OJPHImageFile:
             shape = (height, width, self._num_components)
 
         if out is None:
-            image = np.zeros(shape, dtype=self._dtype)
+            # every sample is written by pull_all_components below, so the
+            # zero-fill of np.zeros would be pure overhead
+            image = np.empty(shape, dtype=self._dtype)
         else:
             if out.dtype != self._dtype:
                 raise ValueError(

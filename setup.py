@@ -93,7 +93,13 @@ if platform.system() == 'Windows':
 if platform.system() == 'Windows':
     extra_compile_args = ['/std:c++17']
 else:
-    extra_compile_args = ['-std=c++17']
+    # -O3 (over distutils' default -O2) is needed to auto-vectorize the
+    # contiguous per-dtype conversion loops in the bindings.
+    extra_compile_args = ['-std=c++17', '-O3']
+    # The clipping loops need SSE4.1 min/max to vectorize; x86-64-v2
+    # (Nehalem 2008 and later) is the same baseline conda-forge uses.
+    if platform.machine() in ('x86_64', 'AMD64'):
+        extra_compile_args.append('-march=x86-64-v2')
 
 ojph_module = Extension(
     'ojph.ojph_bindings',
