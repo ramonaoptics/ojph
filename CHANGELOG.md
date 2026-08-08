@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenJPH build with `param_cod::set_wavelet_kern` (see
   https://github.com/aous72/OpenJPH/issues/261); the produced codestreams
   decode with stock OpenJPH >= 0.30 (including existing `ojph` wheels).
+- Add `wavelet='rev12'`: a reversible predict-only kernel whose high-pass
+  subbands hold exact previous-sample differences (`H = X(2n+1) - X(2n)`).
+  Every resolution level is still an exact subsample and full resolution is
+  still lossless, and on mask-like images the one-sided prediction halves
+  the nonzero detail coefficients, measuring ~35% smaller codestreams than
+  `'rev13'` (and smaller than optimized PNG). The kernel is signaled as a
+  JPEG 2000 Part 2 *arbitrary* (ARB) filter with constant boundary
+  extension, which stock OpenJPH does not implement — decoding `'rev12'`
+  codestreams requires an OpenJPH build with ARB kernel support, unlike
+  `'rev13'` which stock decoders already read.
 - Add `OJPHImageFile.is_predict_only`: True when the codestream's wavelet
   kernel has no effective update steps, i.e. every resolution level is an
   exact subsample of the full-resolution image. The decision inspects the
