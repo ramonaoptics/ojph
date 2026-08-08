@@ -889,6 +889,9 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("set_progression_order", &param_cod::set_progression_order, py::arg("name"))
         .def("set_color_transform", &param_cod::set_color_transform, py::arg("color_transform"))
         .def("set_reversible", static_cast<void (param_cod::*)(bool)>(&param_cod::set_reversible), py::arg("reversible"))
+        .def("set_wavelet_kern", &param_cod::set_wavelet_kern, py::arg("kernel"))
+        .def("get_wavelet_kern", &param_cod::get_wavelet_kern)
+        .def("is_predict_only", &param_cod::is_predict_only)
 
         .def("get_num_decompositions", static_cast<ui32 (param_cod::*)() const>(&param_cod::get_num_decompositions))
         .def("get_block_dims", static_cast<size (param_cod::*)() const>(&param_cod::get_block_dims))

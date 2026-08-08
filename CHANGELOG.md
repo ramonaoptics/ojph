@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Add `wavelet=` to `imwrite` / `imwrite_to_memory`, accepting `'irv97'`,
+  `'rev53'` (the Part 1 kernels, previously selected through `reversible=`),
+  and the new `'rev13'`: a reversible predict-only kernel (the 5/3 kernel
+  with a null update step) signaled with a JPEG 2000 Part 2 ATK marker
+  segment. With `'rev13'`, the low-pass subband of every decomposition holds
+  the even-indexed samples of the previous resolution untouched, so
+  `imread(..., level=r)` returns exactly `image[::2**r, ::2**r]` — no
+  interpolation, no overshoot, and no values absent from the original image —
+  while full-resolution decoding remains lossless. This is designed for
+  label/mask images where in-between values are illegal. Encoding requires an
+  OpenJPH build with `param_cod::set_wavelet_kern` (see
+  https://github.com/aous72/OpenJPH/issues/261); the produced codestreams
+  decode with stock OpenJPH >= 0.30 (including existing `ojph` wheels).
+- Add `OJPHImageFile.is_predict_only`: True when the codestream's wavelet
+  kernel has no effective update steps, i.e. every resolution level is an
+  exact subsample of the full-resolution image. The decision inspects the
+  lifting steps signaled in the ATK marker segment rather than the kernel
+  index (which is file-local in Part 2 and carries no meaning across
+  files), so it is reliable for codestreams produced by other encoders.
+
 ## [0.9.1] - 2026-08-04
 
 - Reshape a caller-supplied `out` buffer with `np.reshape(..., copy=False)`

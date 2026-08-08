@@ -110,6 +110,7 @@ class OJPHImageFile:
         cod = self._codestream.access_cod()
         self._num_decompositions = cod.get_num_decompositions()
         self._progression_order = cod.get_progression_order_as_string()
+        self._is_predict_only = cod.is_predict_only()
 
         if self._channel_order is None:
             if cod.is_using_color_transform():
@@ -181,6 +182,7 @@ class OJPHImageFile:
         cod = instance._codestream.access_cod()
         instance._num_decompositions = cod.get_num_decompositions()
         instance._progression_order = cod.get_progression_order_as_string()
+        instance._is_predict_only = cod.is_predict_only()
 
         if instance._channel_order is None:
             if cod.is_using_color_transform():
@@ -229,6 +231,21 @@ class OJPHImageFile:
     @property
     def progression_order(self):
         return self._progression_order
+
+    @property
+    def is_predict_only(self):
+        """True when the wavelet kernel has no effective update steps.
+
+        For such (reversible) codestreams, every resolution level is an
+        exact subsample of the full-resolution image: reading with
+        ``level=r`` returns ``image[::2**r, ::2**r]`` -- no interpolation
+        and no values that are absent from the original image.
+
+        The decision inspects the lifting steps signaled in the codestream's
+        ATK marker segment, not the kernel index, so it is also reliable for
+        files produced by other Part 2 encoders.
+        """
+        return self._is_predict_only
 
     def get_level_shape(self, level):
         """Get the image shape at a specific decomposition level.
