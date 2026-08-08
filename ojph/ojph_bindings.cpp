@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <cstdlib>
 #include <cstring>
@@ -169,6 +170,301 @@ inline void pull_single_component_into(
 
 }  // anonymous namespace
 
+// ===========================================================================
+// rev13 -- the reversible predict-only ("1/3") wavelet kernel
+// ===========================================================================
+// rev13 is the 5/3 kernel with its update step nulled, so the low-pass subband
+// of every decomposition is *exactly* the even-indexed samples of the previous
+// resolution.  Decoding r skipped resolutions therefore returns exactly
+// ``image[::2**r, ::2**r]`` -- no interpolation, no overshoot, and no sample
+// values that were absent from the original image -- while a full-resolution
+// decode stays lossless.  That is what label/mask images need.
+//
+// Being outside Part 1, the kernel is signalled with a Part 2 ATK marker
+// segment of index 2.  OpenJPH *decodes* such codestreams already (its lifting
+// machinery is driven entirely by the ATK coefficients), but it cannot yet
+// encode with one: there is no public way to select a kernel index above 1 and
+// no ATK writer.  Adding both upstream is tracked in
+// https://github.com/aous72/OpenJPH/issues/261; until that lands and ships, the
+// encoder-side pieces live here so a stock OpenJPH is enough.
+//
+// The trick is that everything OpenJPH derives from "which kernel?" while
+// writing the main header -- the reversible quantization exponents in QCD, the
+// reversibility bit in CAP -- is identical for rev53 and rev13, because rev13
+// is reversible and has the same subband gains.  So the codestream is built as
+// an ordinary rev53 one, and only two things are changed afterwards:
+//
+//   1. install_rev13_kernel() below nulls the update step of the live ATK
+//      object that OpenJPH drives the forward transform with, which turns the
+//      5/3 analysis into rev13 analysis.  This must happen after
+//      write_headers() (which is what links COD to that ATK object) and before
+//      any samples are pushed.
+//   2. ojph/_rev13.py rewrites the finished codestream's main header: it flips
+//      SIZ-Rsiz to signal Part 2, changes COD-SPcod.wavelet_trans from 1 to 2,
+//      and splices in the ATK marker segment returned by
+//      rev13_atk_marker_segment() -- landing the same bytes, in the same
+//      order, that a patched OpenJPH would have written.
+//
+// Step 1 needs the ATK object, which OpenJPH keeps private.  Rather than
+// depend on a patched build, the private layouts are mirrored below and the
+// pointer OpenJPH hands us is reinterpret_cast to them.  Every cast is gated on
+// check_cod_layout() / the rev53 signature check in install_rev13_kernel(),
+// which cross-check enough fields through the public API (and against the
+// known rev53 lifting coefficients) that a mismatched OpenJPH raises instead of
+// silently writing a corrupt file.  Delete this whole section once upstream
+// OpenJPH exposes param_cod::set_wavelet_kern().
+namespace ojph_rev13 {
+
+// Mirrors of the private layouts in OpenJPH's
+// src/core/codestream/ojph_params_local.h.  Copied verbatim (modulo names) so
+// the compiler computes identical offsets, rather than hard-coding any.
+struct spcod_layout {          // local::cod_SPcod
+  ui8 num_decomp;
+  ui8 block_width;
+  ui8 block_height;
+  ui8 block_style;
+  ui8 wavelet_trans;
+  ui8 precinct_size[33];
+};
+
+struct sgcod_layout {          // local::cod_SGcod
+  ui8 prog_order;
+  ui16 num_layers;
+  ui8 mc_trans;
+};
+
+union lifting_step_layout {    // local::lifting_step
+  struct irv_data { float Aatk; };
+  struct rev_data { ui8 Eatk; si16 Batk; si16 Aatk; };
+  irv_data irv;
+  rev_data rev;
+};
+
+struct atk_layout {            // local::param_atk
+  ui16 Latk;
+  ui16 Satk;
+  float Katk;
+  ui8 Natk;
+  lifting_step_layout* d;
+  ui32 max_steps;
+  lifting_step_layout d_store[6];
+  atk_layout* next;
+  atk_layout* top_atk;
+  atk_layout* avail;
+};
+
+struct cod_layout {            // local::param_cod
+  ui8 type;                    // cod_type, declared as `enum : ui8`
+  ui16 Lcod;
+  ui8 Scod;
+  sgcod_layout SGCod;
+  spcod_layout SPcod;
+  cod_layout* next;
+  const atk_layout* atk;
+  cod_layout* top_cod;
+  ui16 comp_idx;
+  cod_layout* avail;
+};
+
+// ojph::param_cod is only a handle around a local::param_cod*, but that pointer
+// is private.  Reach it with the standard explicit-instantiation friend trick,
+// which is ordinary C++ rather than a cast through the object representation.
+template <typename Tag, typename Tag::type Member>
+struct private_member {
+  friend typename Tag::type get_private_member(Tag) { return Member; }
+};
+
+struct cod_state_tag {
+  typedef ojph::local::param_cod* ojph::param_cod::*type;
+  friend type get_private_member(cod_state_tag);
+};
+template struct private_member<cod_state_tag, &ojph::param_cod::state>;
+
+// Bits of param_atk::Satk, which OpenJPH reads through accessors we cannot
+// call on our mirror.
+enum : ui16 {
+  SATK_INDEX_MASK = 0x00FF,  // the ATK index, in the low byte
+  SATK_REVERSIBLE = 0x1000,
+  SATK_M_INIT1    = 0x2000,  // set when synthesis starts on odd-indexed samples
+};
+
+// Everything the ATK marker segment for rev13 is made of, in one place, so the
+// bytes written to the codestream and the coefficients installed into the live
+// kernel cannot drift apart.
+enum : ui16 {
+  // ATK index; 0 and 1 are reserved for the Part 1 kernels, and OpenJPH's ATK
+  // reader rejects a marker segment that claims either of them.
+  KERNEL_INDEX = 2,
+  // whole-sample symmetric extension | reversible | whole-sample filter |
+  // 8-bit coefficients | m_init = 0, plus the index in the low byte.
+  SATK = (ui16)(0x5800 | KERNEL_INDEX),
+};
+
+// The 5/3 kernel exactly as OpenJPH's param_atk::init_rev53() builds it.  Used
+// as a signature: if the object we are about to modify does not look like this,
+// our layout mirrors are wrong (or OpenJPH changed) and we must not touch it.
+struct rev_step { si16 Aatk; si16 Batk; ui8 Eatk; };
+constexpr rev_step REV53_STEPS[2] = { { 1, 2, 2 }, { -1, 1, 1 } };
+constexpr ui16 REV53_SATK = 0x5801;
+constexpr ui16 REV53_LATK = 13;
+
+// rev13: the same prediction step, with the update step nulled.  The nulled
+// step is kept rather than dropped because OpenJPH (and T.801) reconstruct
+// starting from the even-indexed subsequence when m_init = 0, which requires an
+// even number of lifting steps; `A = B = E = 0` makes the step a no-op, so this
+// is mathematically a one-step predict-only kernel.
+constexpr rev_step REV13_STEPS[2] = { { 0, 0, 0 }, { -1, 1, 1 } };
+
+// The ATK marker segment for rev13, ready to splice into a main header:
+//   ATK | Latk | Satk | Natk | (Eatk, Batk, LCatk, Aatk) per lifting step
+// with one 8-bit coefficient per step (LCatk = 1).
+inline std::string atk_marker_segment() {
+  std::string s;
+  auto u8 = [&s](int v) { s.push_back((char)(ui8)v); };
+  auto u16 = [&u8](int v) { u8((v >> 8) & 0xFF); u8(v & 0xFF); };
+  const int num_steps = 2;
+  // Latk counts itself: Latk(2) + Satk(2) + Natk(1) + 5 bytes per step.
+  const int Latk = 5 + 5 * num_steps;
+  u16(0xFF79);                 // ATK marker
+  u16(Latk);
+  u16(SATK);
+  u8(num_steps);               // Natk
+  for (int i = 0; i < num_steps; ++i) {
+    u8(REV13_STEPS[i].Eatk);
+    u16((ui16)REV13_STEPS[i].Batk);
+    u8(1);                     // LCatk: one coefficient per lifting step
+    u8((ui8)(si8)REV13_STEPS[i].Aatk);
+  }
+  return s;
+}
+
+// Sanity-check the mirrored COD layout against what the public API reports.
+// Anything that disagrees means the offsets below are not OpenJPH's.
+inline bool check_cod_layout(const ojph::param_cod& pub, const cod_layout* m) {
+  if (m == nullptr)
+    return false;
+  if (m->type != 1)                                     // COD_MAIN
+    return false;
+  if (m->SPcod.num_decomp != pub.get_num_decompositions())
+    return false;
+  ojph::size log_block = pub.get_log_block_dims();
+  if ((ui32)m->SPcod.block_width + 2u != log_block.w)
+    return false;
+  if ((ui32)m->SPcod.block_height + 2u != log_block.h)
+    return false;
+  if (m->SGCod.prog_order != pub.get_progression_order())
+    return false;
+  if (m->SGCod.num_layers != pub.get_num_layers())
+    return false;
+  if (m->SGCod.mc_trans != (pub.is_using_color_transform() ? 1 : 0))
+    return false;
+
+  const atk_layout* atk = m->atk;
+  if (atk == nullptr) {
+    // No kernel linked yet, so only a Part 1 kernel can have been selected and
+    // is_reversible() pins this byte to 1 (5/3) or 0 (9/7).
+    if (m->SPcod.wavelet_trans != (pub.is_reversible() ? 1 : 0))
+      return false;
+  } else {
+    // update_atk() links COD to the ATK object whose index it names, and
+    // is_reversible() reads its reversibility bit. Both cross-check the
+    // mirrored ATK layout too, whatever kernel is in use.
+    if ((atk->Satk & SATK_INDEX_MASK) != m->SPcod.wavelet_trans)
+      return false;
+    if (((atk->Satk & SATK_REVERSIBLE) != 0) != pub.is_reversible())
+      return false;
+    if (atk->Natk == 0 || atk->d == nullptr)
+      return false;
+  }
+  return true;
+}
+
+// Reach the mirrored COD behind a param_cod handle, or throw if it does not
+// look like one. Shared by every entry point below.
+inline cod_layout* access_cod_layout(const ojph::param_cod& pub) {
+  ojph::local::param_cod* state = pub.*get_private_member(cod_state_tag());
+  cod_layout* cod = reinterpret_cast<cod_layout*>(state);
+  if (!check_cod_layout(pub, cod))
+    throw std::runtime_error(
+      "rev13: this OpenJPH build does not match the COD layout the rev13 "
+      "support was written against; encode with wavelet='rev53' instead, or "
+      "rebuild against a supported OpenJPH.");
+  return cod;
+}
+
+// True when the kernel never modifies the low-pass (even-indexed) subsequence.
+// With m_init = 0 the even-indexed lifting steps are the update steps, so the
+// kernel is predict-only when every one of them is a no-op: a reversible step
+// adds (Batk + Aatk * (x1 + x2)) >> Eatk, which is identically zero when
+// Aatk == 0 and Batk >> Eatk == 0.
+inline bool atk_is_predict_only(const atk_layout* atk) {
+  if ((atk->Satk & SATK_REVERSIBLE) == 0 || (atk->Satk & SATK_M_INIT1) != 0)
+    return false;
+  for (ui32 s = 0; s < atk->Natk; s += 2)
+    if (atk->d[s].rev.Aatk != 0 ||
+        (atk->d[s].rev.Batk >> atk->d[s].rev.Eatk) != 0)
+      return false;
+  return true;
+}
+
+// Whether the codestream's kernel leaves the low-pass subband of every
+// decomposition equal to the even-indexed samples of the previous resolution,
+// so that resolution level r decodes to the image subsampled by 2^r.
+//
+// Like upstream's param_cod::is_predict_only(), this inspects the lifting steps
+// signalled in the ATK marker segment, never the kernel index: a Part 2 index
+// is file-local and says nothing on its own. OpenJPH's own test corpus has a
+// codestream using index 2 for an *irreversible* 5/3, which must report false.
+inline bool is_predict_only(const ojph::param_cod& pub) {
+  const cod_layout* cod = access_cod_layout(pub);
+  if (cod->atk == nullptr)
+    // Encoding, before write_headers() associates an ATK object with this COD.
+    // Nothing describes the kernel yet but the index, and rev13 is the only
+    // kernel beyond Part 1 this package can encode with.
+    return cod->SPcod.wavelet_trans == KERNEL_INDEX;
+  // Upstream short-circuits a Part 1 index to false here. Asking the lifting
+  // steps instead gives the same answer for both Part 1 kernels -- 5/3's update
+  // step has Aatk = 1, and 9/7 is not reversible -- and it stays right for a
+  // codestream mid-encode, whose COD still names 5/3 while
+  // install_rev13_kernel() has already nulled that update step.
+  return atk_is_predict_only(cod->atk);
+}
+
+// Turn the live 5/3 analysis kernel into rev13 by nulling its update step.
+// Call after write_headers() and before pushing any samples.
+inline void install_rev13_kernel(ojph::codestream& cs) {
+  ojph::param_cod pub = cs.access_cod();
+  cod_layout* cod = access_cod_layout(pub);
+
+  // COD is linked to a kernel by write_headers(), so a null pointer here means
+  // the caller has the ordering wrong rather than that anything is broken.
+  atk_layout* atk = const_cast<atk_layout*>(cod->atk);
+  if (atk == nullptr)
+    throw std::runtime_error(
+      "rev13: no wavelet kernel is linked yet; write_headers() must be "
+      "called before install_rev13_wavelet().");
+  if (atk->Satk != REV53_SATK || atk->Latk != REV53_LATK || atk->Natk != 2 ||
+      atk->d == nullptr)
+    throw std::runtime_error(
+      "rev13: the codestream is not using the reversible 5/3 kernel that "
+      "rev13 is derived from.");
+  for (int i = 0; i < 2; ++i)
+    if (atk->d[i].rev.Aatk != REV53_STEPS[i].Aatk ||
+        atk->d[i].rev.Batk != REV53_STEPS[i].Batk ||
+        atk->d[i].rev.Eatk != REV53_STEPS[i].Eatk)
+      throw std::runtime_error(
+        "rev13: the 5/3 lifting coefficients in this OpenJPH build are not "
+        "the ones the rev13 encoder was written against.");
+
+  for (int i = 0; i < 2; ++i) {
+    atk->d[i].rev.Aatk = REV13_STEPS[i].Aatk;
+    atk->d[i].rev.Batk = REV13_STEPS[i].Batk;
+    atk->d[i].rev.Eatk = REV13_STEPS[i].Eatk;
+  }
+}
+
+}  // namespace ojph_rev13
+
 // Declare that this module runs without the GIL, so a free-threaded CPython
 // (3.13t/3.14t) keeps the GIL disabled instead of silently re-enabling it at
 // import time with a RuntimeWarning. This is safe here because the module holds
@@ -284,6 +580,12 @@ PYBIND11_MODULE(ojph_bindings, m) {
                  self.write_headers(file, comments_ptr, num_comments);
              },
              py::arg("file"), py::arg("comments") = py::none(), py::arg("num_comments") = 0)
+        // Switch the forward transform to the rev13 (reversible predict-only)
+        // kernel. Must be called after write_headers() and before any samples
+        // are pushed; the resulting codestream still needs the main-header
+        // fixups in ojph/_rev13.py to declare the kernel it actually used.
+        .def("install_rev13_wavelet",
+             [](codestream &self) { ojph_rev13::install_rev13_kernel(self); })
         .def("exchange",
              [](codestream &self, py::object line_buf_obj, ui32 &next_component) -> line_buf* {
                  line_buf* buf = nullptr;
@@ -894,6 +1196,16 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("get_block_dims", static_cast<size (param_cod::*)() const>(&param_cod::get_block_dims))
         .def("get_log_block_dims", static_cast<size (param_cod::*)() const>(&param_cod::get_log_block_dims))
         .def("is_reversible", static_cast<bool (param_cod::*)() const>(&param_cod::is_reversible))
+        // True when the employed kernel has no effective update steps, so the
+        // low-pass subband of each decomposition holds the even-indexed samples
+        // of the previous resolution untouched; with a reversible kernel and
+        // lossless coding, resolution level r decodes to the image subsampled
+        // by 2^r. Decided from the lifting steps signalled in the ATK marker
+        // segment, so it is reliable for codestreams from other encoders too.
+        .def("is_predict_only",
+             [](const param_cod& self) {
+                 return ojph_rev13::is_predict_only(self);
+             })
         .def("get_precinct_size", static_cast<size (param_cod::*)(ui32) const>(&param_cod::get_precinct_size), py::arg("level_num"))
         .def("get_log_precinct_size", static_cast<size (param_cod::*)(ui32) const>(&param_cod::get_log_precinct_size), py::arg("level_num"))
         .def("get_progression_order", &param_cod::get_progression_order)
@@ -903,6 +1215,14 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("packets_may_use_sop", &param_cod::packets_may_use_sop)
         .def("packets_use_eph", &param_cod::packets_use_eph)
         .def("get_block_vertical_causality", static_cast<bool (param_cod::*)() const>(&param_cod::get_block_vertical_causality));
+
+    // rev13 main-header pieces, exported so ojph/_rev13.py splices exactly the
+    // bytes that describe the kernel install_rev13_wavelet() actually applied.
+    m.attr("REV13_WAVELET_INDEX") = (ui32)ojph_rev13::KERNEL_INDEX;
+    m.def("rev13_atk_marker_segment",
+          []() { return py::bytes(ojph_rev13::atk_marker_segment()); },
+          "The Part 2 ATK marker segment (marker included) describing the "
+          "rev13 reversible predict-only wavelet kernel.");
 
     py::class_<param_qcd>(m, "ParamQcd")
         .def("set_irrev_quant", static_cast<void (param_qcd::*)(float)>(&param_qcd::set_irrev_quant), py::arg("delta"))
