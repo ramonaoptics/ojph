@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.2] - 2026-08-09
 
-- Update the vendored ojph fork to 1.1.0, whose SIMD kernels are now a
+- Update the vendored ojph fork to 1.1.1, whose SIMD kernels are now a
   Highway "fat binary": one kernel source compiled for SSE4.1, AVX2, and
   three AVX-512 tiers, selected at run time per CPU. Machines with
   AVX-512 (e.g. Sapphire Rapids Xeons, Zen 4+) gain roughly 8–10% encode
