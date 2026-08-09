@@ -35,6 +35,7 @@ def imwrite_to_memory(
     channel_order=None,
     num_decompositions=None,
     reversible=None,
+    wavelet=None,
     qstep=None,
     progression_order=None,
     tlm_marker=True,
@@ -51,6 +52,7 @@ def imwrite_to_memory(
         codestream=codestream,
         num_decompositions=num_decompositions,
         reversible=reversible,
+        wavelet=wavelet,
         qstep=qstep,
         progression_order=progression_order,
         tlm_marker=tlm_marker,
@@ -71,6 +73,7 @@ def imwrite(
     codestream=None,
     num_decompositions=None,
     reversible=None,
+    wavelet=None,
     qstep=None,
     progression_order=None,
     tlm_marker=True,
@@ -142,9 +145,42 @@ def imwrite(
             f"Must be one of: {', '.join(sorted(valid_progressions))}"
         )
     cod.set_progression_order(progression_order)
+    # The wavelet kernel; 'rev53' and 'irv97' are the standard Part 1
+    # kernels, selected by default through the reversible flag.  'rev13'
+    # and 'rev12' are reversible predict-only kernels (JPEG 2000 Part 2,
+    # signaled with an ATK marker segment): the low-pass subband of each
+    # decomposition holds the even-indexed samples of the previous
+    # resolution untouched, so decoding r skipped resolutions returns
+    # exactly image[::2**r, ::2**r].  'rev13' predicts each odd sample
+    # from the average of its two even neighbors (decodable by stock
+    # OpenJPH); 'rev12' predicts each odd sample from the even sample
+    # preceding it (previous-pixel differences, often smaller for
+    # mask-like images), and requires an OpenJPH build with arbitrary
+    # (ARB) kernel support for decoding.
+    valid_wavelets = {'irv97': False, 'rev53': True, 'rev13': True,
+                      'rev12': True}
+    if wavelet is not None:
+        wavelet = wavelet.lower()
+        if wavelet not in valid_wavelets:
+            raise ValueError(
+                f"Invalid wavelet '{wavelet}'. "
+                f"Must be one of: {', '.join(sorted(valid_wavelets))}"
+            )
+        if reversible is None:
+            reversible = valid_wavelets[wavelet]
+        elif reversible != valid_wavelets[wavelet]:
+            raise ValueError(
+                f"The wavelet '{wavelet}' is "
+                f"{'reversible' if valid_wavelets[wavelet] else 'irreversible'}"
+                f", which contradicts reversible={reversible}."
+            )
     if reversible is None:
         reversible = True
     cod.set_reversible(reversible)
+    if wavelet == 'rev13':
+        cod.set_wavelet_kern(2)
+    elif wavelet == 'rev12':
+        cod.set_wavelet_kern(3)
     cod.set_color_transform(False)
     if num_decompositions is not None:
         cod.set_num_decomposition(num_decompositions)

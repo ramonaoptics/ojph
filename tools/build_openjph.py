@@ -28,12 +28,25 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
 from pathlib import Path
 
 # Pinned to a released OpenJPH tag (>= 0.30.1, the minimum the bindings need)
 # so the wheels are reproducible. Bump it deliberately, not automatically.
-DEFAULT_GIT_URL = "https://github.com/aous72/OpenJPH.git"
-DEFAULT_GIT_REF = "0.30.1"
+DEFAULT_GIT_URL = "https://github.com/hmaarrfk/OpenJPH.git"
+DEFAULT_GIT_REF = "ojph"
+
+# Google Highway is a hard build dependency on Linux, Windows, and macOS:
+# without its headers the library silently falls back to generic (scalar)
+# kernels. Header-only usage -- nothing is linked -- so a source tree is
+# enough when no installed copy is found. Keep the version in sync with
+# what conda-forge ships.
+HWY_VERSION = "1.4.0"
+HWY_URL = (
+    "https://github.com/google/highway/archive/refs/tags/"
+    f"{HWY_VERSION}.tar.gz"
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -43,8 +56,11 @@ def run(cmd, **kwargs):
     subprocess.run([str(c) for c in cmd], check=True, **kwargs)
 
 
+SUBMODULE_DIR = PROJECT_ROOT / "subprojects" / "ojph"
+
+
 def clone(source_dir: Path, url: str, ref: str) -> None:
-    if (source_dir / ".git").is_dir():
+    if (source_dir / ".git").is_dir() or (source_dir / ".git").is_file():
         print(f"Reusing existing OpenJPH checkout at {source_dir}", flush=True)
     else:
         if source_dir.exists():
@@ -57,7 +73,41 @@ def clone(source_dir: Path, url: str, ref: str) -> None:
     run(["git", "-C", source_dir, "checkout", "-q", "FETCH_HEAD"])
 
 
-def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path) -> None:
+def find_or_fetch_hwy(download_root: Path) -> Path:
+    """Locate the Google Highway headers, downloading a pinned release
+    into ``download_root`` when no installed copy is found. Returns the
+    include directory containing ``hwy/highway.h``."""
+    candidates = []
+    if os.environ.get("OJPH_HWY_INCLUDE_DIR"):
+        candidates.append(Path(os.environ["OJPH_HWY_INCLUDE_DIR"]))
+    conda = os.environ.get("CONDA_PREFIX")
+    if conda:
+        candidates.append(Path(conda) / "include")
+        candidates.append(Path(conda) / "Library" / "include")  # conda on Windows
+    candidates += [Path("/usr/local/include"), Path("/usr/include")]
+    for cand in candidates:
+        if (cand / "hwy" / "highway.h").is_file():
+            print(f"Using Google Highway headers from {cand}", flush=True)
+            return cand
+
+    src = download_root / f"highway-{HWY_VERSION}"
+    if not (src / "hwy" / "highway.h").is_file():
+        download_root.mkdir(parents=True, exist_ok=True)
+        tarball = download_root / f"highway-{HWY_VERSION}.tar.gz"
+        print(f"Downloading Google Highway {HWY_VERSION} from {HWY_URL}",
+              flush=True)
+        urllib.request.urlretrieve(HWY_URL, tarball)
+        with tarfile.open(tarball) as tf:
+            tf.extractall(download_root)
+        tarball.unlink()
+    if not (src / "hwy" / "highway.h").is_file():
+        raise RuntimeError(f"Highway download did not produce {src}/hwy/highway.h")
+    print(f"Using Google Highway headers from {src}", flush=True)
+    return src
+
+
+def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path,
+                    hwy_include) -> None:
     args = [
         "cmake",
         "-S", source_dir,
@@ -73,6 +123,14 @@ def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path) -> None:
         "-DOJPH_BUILD_TESTS=OFF",
         "-DOJPH_ENABLE_TIFF_SUPPORT=OFF",
     ]
+
+    if hwy_include is not None:
+        args += [
+            f"-DOJPH_HWY_INCLUDE_DIR={hwy_include}",
+            # Hard dependency: fail the build rather than silently fall
+            # back to the scalar kernels.
+            "-DOJPH_REQUIRE_HWY=ON",
+        ]
 
     osx_archs = os.environ.get("CMAKE_OSX_ARCHITECTURES")
     if sys.platform == "darwin" and osx_archs:
@@ -94,6 +152,11 @@ def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path) -> None:
         # invoked from this (non-developer-prompt) subprocess.
         generator = os.environ.get("CMAKE_GENERATOR", "Ninja")
         args += ["-G", generator]
+        # Pin both compilers to cl.exe. Conda-forge's `compilers` package now
+        # ships clang on Windows, and with the conda env on PATH CMake would
+        # otherwise pick clang for C and cl for CXX and reject the mix.
+        if shutil.which("cl"):
+            args += ["-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=cl"]
         if not shutil.which("cl") and generator == "Ninja":
             print(
                 "WARNING: cl.exe not found on PATH; the MSVC developer "
@@ -124,8 +187,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--source-dir",
-        default=str(PROJECT_ROOT / "build" / "openjph-src"),
-        help="where to clone the OpenJPH sources",
+        default=None,
+        help="OpenJPH sources; defaults to the subprojects/ojph submodule "
+             "when present, else a fresh clone under build/openjph-src",
     )
     parser.add_argument(
         "--jobs", type=int, default=os.cpu_count() or 2,
@@ -134,19 +198,42 @@ def main() -> int:
     args = parser.parse_args()
 
     prefix = Path(args.prefix).resolve()
-    source_dir = Path(args.source_dir).resolve()
-    build_dir = source_dir.parent / "openjph-build"
+    if args.source_dir is not None:
+        source_dir = Path(args.source_dir).resolve()
+    elif (SUBMODULE_DIR / "CMakeLists.txt").is_file():
+        source_dir = SUBMODULE_DIR
+    elif (PROJECT_ROOT / ".gitmodules").is_file():
+        # submodule declared but not initialized
+        run(["git", "-C", PROJECT_ROOT, "submodule", "update", "--init",
+             "--depth", "1", str(SUBMODULE_DIR)])
+        source_dir = SUBMODULE_DIR
+    else:
+        source_dir = (PROJECT_ROOT / "build" / "openjph-src").resolve()
+    build_dir = PROJECT_ROOT / "build" / "openjph-build"
 
     url = os.environ.get("OPENJPH_GIT_URL", DEFAULT_GIT_URL)
     ref = os.environ.get("OPENJPH_GIT_REF", DEFAULT_GIT_REF)
 
-    print(f"Building OpenJPH {ref}\n  from   {url}\n  into   {prefix}", flush=True)
+    print(f"Building OpenJPH\n  from   {source_dir}\n  into   {prefix}",
+          flush=True)
 
-    clone(source_dir, url, ref)
+    if source_dir != SUBMODULE_DIR:
+        clone(source_dir, url, ref)
+
+    # Google Highway is required on the mainstream platforms; special
+    # platforms (or an explicit OJPH_ALLOW_NO_HWY=1) fall back to the
+    # fork's auto-detection.
+    if os.environ.get("OJPH_ALLOW_NO_HWY") == "1":
+        hwy_include = None
+    elif sys.platform.startswith(("linux", "darwin", "win")):
+        hwy_include = find_or_fetch_hwy(PROJECT_ROOT / "build")
+    else:
+        hwy_include = None
+
     # Reconfigure from scratch so stale cache (e.g. a prior arch) never leaks in.
     if build_dir.exists():
         shutil.rmtree(build_dir)
-    cmake_configure(source_dir, build_dir, prefix)
+    cmake_configure(source_dir, build_dir, prefix, hwy_include)
     cmake_build_install(build_dir, args.jobs)
 
     # Sanity check: the static archive and headers must exist where setup.py looks.
@@ -156,7 +243,7 @@ def main() -> int:
         if libdir.is_dir():
             found += [p for p in libdir.iterdir()
                       if p.suffix in (".a", ".lib")]
-    incdir = prefix / "include" / "openjph"
+    incdir = prefix / "include" / "ojph"
     print(f"Installed headers present: {incdir.is_dir()}", flush=True)
     print(f"Installed static libs: {[str(p) for p in found]}", flush=True)
     if not found:

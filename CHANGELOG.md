@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-08
+
+- Add `wavelet=` to `imwrite` / `imwrite_to_memory`, accepting `'irv97'`,
+  `'rev53'` (the Part 1 kernels, previously selected through `reversible=`),
+  and the new `'rev13'`: a reversible predict-only kernel (the 5/3 kernel
+  with a null update step) signaled with a JPEG 2000 Part 2 ATK marker
+  segment. With `'rev13'`, the low-pass subband of every decomposition holds
+  the even-indexed samples of the previous resolution untouched, so
+  `imread(..., level=r)` returns exactly `image[::2**r, ::2**r]` — no
+  interpolation, no overshoot, and no values absent from the original image —
+  while full-resolution decoding remains lossless. This is designed for
+  label/mask images where in-between values are illegal. Encoding requires an
+  OpenJPH build with `param_cod::set_wavelet_kern` (see
+  https://github.com/aous72/OpenJPH/issues/261); the produced codestreams
+  decode with stock OpenJPH >= 0.30 (including existing `ojph` wheels).
+- Add `wavelet='rev12'`: a reversible predict-only kernel whose high-pass
+  subbands hold exact previous-sample differences (`H = X(2n+1) - X(2n)`).
+  Every resolution level is still an exact subsample and full resolution is
+  still lossless, and on mask-like images the one-sided prediction halves
+  the nonzero detail coefficients, measuring ~35% smaller codestreams than
+  `'rev13'` (and smaller than optimized PNG). The kernel is signaled as a
+  JPEG 2000 Part 2 *arbitrary* (ARB) filter with constant boundary
+  extension, which stock OpenJPH does not implement — decoding `'rev12'`
+  codestreams requires an OpenJPH build with ARB kernel support, unlike
+  `'rev13'` which stock decoders already read.
+- Add `OJPHImageFile.is_predict_only`: True when the codestream's wavelet
+  kernel has no effective update steps, i.e. every resolution level is an
+  exact subsample of the full-resolution image. The decision inspects the
+  lifting steps signaled in the ATK marker segment rather than the kernel
+  index (which is file-local in Part 2 and carries no meaning across
+  files), so it is reliable for codestreams produced by other encoders.
+- The extension no longer links a system or conda OpenJPH. It now vendors
+  the [ojph fork of OpenJPH](https://github.com/hmaarrfk/OpenJPH/tree/ojph)
+  as a git submodule (`subprojects/ojph`) and links it statically, so the
+  new wavelet kernels and encoder optimizations ship in every wheel with
+  no runtime dependency. Building from source requires `cmake` and the
+  submodule (`git clone --recursive`, or run `tools/build_openjph.py`);
+  linking a shared `libojph` remains available as a development fallback.
+- Large encode/decode speedups beyond the wavelet work: dtype-specialized
+  ingest/output loops, a 16-bit internal line pipeline for low-bit-depth
+  predict-only encodes, zero-row codeblock elision, and fused single-pass
+  transforms. On 4096×4096 uint8 masks, encode is ~2.7× and decode ~1.9×
+  faster than ojph 0.9.1, and reduced-resolution reads
+  (`imread(level=2)`) drop to ~0.5 ms.
+- The vendored OpenJPH fork's SIMD kernels are now implemented with
+  [Google Highway](https://github.com/google/highway) (plus three
+  hand-tuned AVX2 routines that measured faster), replacing the previous
+  per-instruction-set implementations. On a 4096×4096 uint8 mask this
+  roughly halves encode time and cuts decode time ~20% versus the
+  upstream SIMD. Highway is a hard *build* dependency on Linux, Windows,
+  and macOS: `tools/build_openjph.py` uses installed headers (conda-forge
+  `libhwy`) when present and otherwise downloads a pinned Highway release
+  — it is header-only for this use, so wheels and installed extensions
+  gain no runtime dependency.
+
 ## [0.9.1] - 2026-08-04
 
 - Reshape a caller-supplied `out` buffer with `np.reshape(..., copy=False)`

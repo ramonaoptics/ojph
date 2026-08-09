@@ -41,3 +41,9 @@ test-skip = ["*-win_arm64", "*-macosx_x86_64"]
 [tool.cibuildwheel.linux]
 # manylinux containers don't ship CMake/Ninja; grab them from PyPI.
 before-all = "pip install cmake ninja && python {project}/tools/build_openjph.py"
+
+[tool.pytest.ini_options]
+# Only collect our own tests; without this, a bare ``pytest`` walks into
+# subprojects/ (the vendored ojph fork of OpenJPH) and tries to import
+# googletest's Python helper scripts.
+testpaths = ["tests"]

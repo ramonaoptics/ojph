@@ -16,10 +16,10 @@
   #include <unistd.h>
 #endif
 
-#include <openjph/ojph_file.h>
-#include <openjph/ojph_codestream.h>
-#include <openjph/ojph_mem.h>
-#include <openjph/ojph_params.h>
+#include <ojph/ojph_file.h>
+#include <ojph/ojph_codestream.h>
+#include <ojph/ojph_mem.h>
+#include <ojph/ojph_params.h>
 
 namespace py = pybind11;
 using namespace ojph;
@@ -32,6 +32,45 @@ namespace {
 constexpr size_t OJPH_READ_ALIGN = 4096;
 
 inline size_t round_up(size_t v, size_t a) { return (v + a - 1) / a * a; }
+
+// Copy one decoded si32 line into the caller's output row, narrowing to T
+// and optionally clipping. The contiguous case (col_stride == sizeof(T)) is
+// kept as tight per-type loops that the compiler auto-vectorizes into
+// packed narrowing stores; the strided fallback handles anything else.
+template <typename T>
+inline void line_to_out(const si32* line_data, size_t n, char* out,
+                        size_t col_stride, bool do_clip,
+                        si32 min_val, si32 max_val)
+{
+    if (col_stride == sizeof(T)) {
+        T* dp = reinterpret_cast<T*>(out);
+        if (do_clip) {
+            for (size_t i = 0; i < n; ++i) {
+                si32 val = line_data[i];
+                val = val < min_val ? min_val : val;
+                val = val > max_val ? max_val : val;
+                dp[i] = static_cast<T>(val);
+            }
+        } else {
+            for (size_t i = 0; i < n; ++i)
+                dp[i] = static_cast<T>(line_data[i]);
+        }
+    } else {
+        if (do_clip) {
+            for (size_t i = 0; i < n; ++i) {
+                si32 val = line_data[i];
+                val = val < min_val ? min_val : val;
+                val = val > max_val ? max_val : val;
+                *reinterpret_cast<T*>(out + i * col_stride) =
+                    static_cast<T>(val);
+            }
+        } else {
+            for (size_t i = 0; i < n; ++i)
+                *reinterpret_cast<T*>(out + i * col_stride) =
+                    static_cast<T>(line_data[i]);
+        }
+    }
+}
 
 // Portable aligned allocation. The returned pointer must be released with
 // aligned_free(). Sized up to a multiple of ``align`` so O_DIRECT reads that
@@ -143,26 +182,20 @@ inline void pull_single_component_into(
     const si32* ld = line->i32;
     char* dst = out_ptr + r * row_stride;
     if (element_size == 1) {
-      for (size_t i = 0; i < cols; ++i) {
-        si32 v = ld[i];
-        if (do_clip) { if (v < min_val) v = min_val; if (v > max_val) v = max_val; }
-        if (is_unsigned) *reinterpret_cast<ui8*>(dst + i) = (ui8)v;
-        else             *reinterpret_cast<si8*>(dst + i) = (si8)v;
-      }
+      if (is_unsigned)
+        line_to_out<ui8>(ld, cols, dst, 1, do_clip, min_val, max_val);
+      else
+        line_to_out<si8>(ld, cols, dst, 1, do_clip, min_val, max_val);
     } else if (element_size == 2) {
-      for (size_t i = 0; i < cols; ++i) {
-        si32 v = ld[i];
-        if (do_clip) { if (v < min_val) v = min_val; if (v > max_val) v = max_val; }
-        if (is_unsigned) *reinterpret_cast<ui16*>(dst + i * 2) = (ui16)v;
-        else             *reinterpret_cast<si16*>(dst + i * 2) = (si16)v;
-      }
+      if (is_unsigned)
+        line_to_out<ui16>(ld, cols, dst, 2, do_clip, min_val, max_val);
+      else
+        line_to_out<si16>(ld, cols, dst, 2, do_clip, min_val, max_val);
     } else {
-      for (size_t i = 0; i < cols; ++i) {
-        si32 v = ld[i];
-        if (do_clip) { if (v < min_val) v = min_val; if (v > max_val) v = max_val; }
-        if (is_unsigned) *reinterpret_cast<ui32*>(dst + i * 4) = (ui32)v;
-        else             *reinterpret_cast<si32*>(dst + i * 4) = v;
-      }
+      if (is_unsigned)
+        line_to_out<ui32>(ld, cols, dst, 4, do_clip, min_val, max_val);
+      else
+        line_to_out<si32>(ld, cols, dst, 4, do_clip, min_val, max_val);
     }
   }
 }
@@ -369,7 +402,44 @@ PYBIND11_MODULE(ojph_bindings, m) {
                                  throw py::value_error("Line size mismatch");
                              }
 
-                             if (element_size == 1) {
+                             if (col_stride == element_size) {
+                                 // Contiguous row: with the stride known to
+                                 // equal the element size, these tight loops
+                                 // auto-vectorize into packed widening loads,
+                                 // which the generic strided loops below
+                                 // cannot.
+                                 if (element_size == 1) {
+                                     if (format_char == 'B') {
+                                         const ui8* sp = reinterpret_cast<const ui8*>(row_start);
+                                         for (size_t i = 0; i < line_size; ++i)
+                                             line_data[i] = static_cast<si32>(sp[i]);
+                                     } else {
+                                         const si8* sp = reinterpret_cast<const si8*>(row_start);
+                                         for (size_t i = 0; i < line_size; ++i)
+                                             line_data[i] = static_cast<si32>(sp[i]);
+                                     }
+                                 } else if (element_size == 2) {
+                                     if (format_char == 'H') {
+                                         const ui16* sp = reinterpret_cast<const ui16*>(row_start);
+                                         for (size_t i = 0; i < line_size; ++i)
+                                             line_data[i] = static_cast<si32>(sp[i]);
+                                     } else {
+                                         const si16* sp = reinterpret_cast<const si16*>(row_start);
+                                         for (size_t i = 0; i < line_size; ++i)
+                                             line_data[i] = static_cast<si32>(sp[i]);
+                                     }
+                                 } else {
+                                     if (format_char == 'I' || format_char == 'L') {
+                                         const ui32* sp = reinterpret_cast<const ui32*>(row_start);
+                                         for (size_t i = 0; i < line_size; ++i)
+                                             line_data[i] = static_cast<si32>(sp[i]);
+                                     } else {
+                                         const si32* sp = reinterpret_cast<const si32*>(row_start);
+                                         for (size_t i = 0; i < line_size; ++i)
+                                             line_data[i] = sp[i];
+                                     }
+                                 }
+                             } else if (element_size == 1) {
                                  if (format_char == 'B') {
                                      for (size_t i = 0; i < line_size; ++i) {
                                          line_data[i] = static_cast<si32>(*reinterpret_cast<const ui8*>(row_start + i * col_stride));
@@ -482,88 +552,33 @@ PYBIND11_MODULE(ojph_bindings, m) {
                              si32* line_data = line->i32;
                              char* out_row_start = component_base + h * row_stride;
 
-                             if (do_clip) {
-                                 if (element_size == 1) {
-                                     if (is_unsigned) {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             si32 val = line_data[i];
-                                             if (val < min_val) val = min_val;
-                                             if (val > max_val) val = max_val;
-                                             *reinterpret_cast<ui8*>(out_row_start + i * col_stride) = static_cast<ui8>(val);
-                                         }
-                                     } else {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             si32 val = line_data[i];
-                                             if (val < min_val) val = min_val;
-                                             if (val > max_val) val = max_val;
-                                             *reinterpret_cast<si8*>(out_row_start + i * col_stride) = static_cast<si8>(val);
-                                         }
-                                     }
-                                 } else if (element_size == 2) {
-                                     if (is_unsigned) {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             si32 val = line_data[i];
-                                             if (val < min_val) val = min_val;
-                                             if (val > max_val) val = max_val;
-                                             *reinterpret_cast<ui16*>(out_row_start + i * col_stride) = static_cast<ui16>(val);
-                                         }
-                                     } else {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             si32 val = line_data[i];
-                                             if (val < min_val) val = min_val;
-                                             if (val > max_val) val = max_val;
-                                             *reinterpret_cast<si16*>(out_row_start + i * col_stride) = static_cast<si16>(val);
-                                         }
-                                     }
-                                 } else {
-                                     if (is_unsigned) {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             si32 val = line_data[i];
-                                             if (val < min_val) val = min_val;
-                                             if (val > max_val) val = max_val;
-                                             *reinterpret_cast<ui32*>(out_row_start + i * col_stride) = static_cast<ui32>(val);
-                                         }
-                                     } else {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             si32 val = line_data[i];
-                                             if (val < min_val) val = min_val;
-                                             if (val > max_val) val = max_val;
-                                             *reinterpret_cast<si32*>(out_row_start + i * col_stride) = val;
-                                         }
-                                     }
-                                 }
+                             if (element_size == 1) {
+                                 if (is_unsigned)
+                                     line_to_out<ui8>(line_data, line_size,
+                                         out_row_start, col_stride,
+                                         do_clip, min_val, max_val);
+                                 else
+                                     line_to_out<si8>(line_data, line_size,
+                                         out_row_start, col_stride,
+                                         do_clip, min_val, max_val);
+                             } else if (element_size == 2) {
+                                 if (is_unsigned)
+                                     line_to_out<ui16>(line_data, line_size,
+                                         out_row_start, col_stride,
+                                         do_clip, min_val, max_val);
+                                 else
+                                     line_to_out<si16>(line_data, line_size,
+                                         out_row_start, col_stride,
+                                         do_clip, min_val, max_val);
                              } else {
-                                 if (element_size == 1) {
-                                     if (is_unsigned) {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             *reinterpret_cast<ui8*>(out_row_start + i * col_stride) = static_cast<ui8>(line_data[i]);
-                                         }
-                                     } else {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             *reinterpret_cast<si8*>(out_row_start + i * col_stride) = static_cast<si8>(line_data[i]);
-                                         }
-                                     }
-                                 } else if (element_size == 2) {
-                                     if (is_unsigned) {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             *reinterpret_cast<ui16*>(out_row_start + i * col_stride) = static_cast<ui16>(line_data[i]);
-                                         }
-                                     } else {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             *reinterpret_cast<si16*>(out_row_start + i * col_stride) = static_cast<si16>(line_data[i]);
-                                         }
-                                     }
-                                 } else {
-                                     if (is_unsigned) {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             *reinterpret_cast<ui32*>(out_row_start + i * col_stride) = static_cast<ui32>(line_data[i]);
-                                         }
-                                     } else {
-                                         for (size_t i = 0; i < line_size; ++i) {
-                                             *reinterpret_cast<si32*>(out_row_start + i * col_stride) = line_data[i];
-                                         }
-                                     }
-                                 }
+                                 if (is_unsigned)
+                                     line_to_out<ui32>(line_data, line_size,
+                                         out_row_start, col_stride,
+                                         do_clip, min_val, max_val);
+                                 else
+                                     line_to_out<si32>(line_data, line_size,
+                                         out_row_start, col_stride,
+                                         do_clip, min_val, max_val);
                              }
                          }
                      }
@@ -889,6 +904,9 @@ PYBIND11_MODULE(ojph_bindings, m) {
         .def("set_progression_order", &param_cod::set_progression_order, py::arg("name"))
         .def("set_color_transform", &param_cod::set_color_transform, py::arg("color_transform"))
         .def("set_reversible", static_cast<void (param_cod::*)(bool)>(&param_cod::set_reversible), py::arg("reversible"))
+        .def("set_wavelet_kern", &param_cod::set_wavelet_kern, py::arg("kernel"))
+        .def("get_wavelet_kern", &param_cod::get_wavelet_kern)
+        .def("is_predict_only", &param_cod::is_predict_only)
 
         .def("get_num_decompositions", static_cast<ui32 (param_cod::*)() const>(&param_cod::get_num_decompositions))
         .def("get_block_dims", static_cast<size (param_cod::*)() const>(&param_cod::get_block_dims))

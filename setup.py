@@ -28,6 +28,7 @@ version, cmdclass = get_version_and_cmdclass("ojph")
 # Include the pybind11 include directory
 include_dirs = [pybind11.get_include()]
 library_dirs = []
+runtime_library_dirs = []
 libraries = []
 extra_objects = []
 
@@ -42,12 +43,12 @@ def _find_static_openjph(install_dir):
     (``openjph.0.30.lib``), which ``-l`` / ``libraries=`` cannot locate.
     """
     include_dir = os.path.join(install_dir, 'include')
-    if not os.path.isdir(os.path.join(include_dir, 'openjph')):
+    if not os.path.isdir(os.path.join(include_dir, 'ojph')):
         return None
     if platform.system() == 'Windows':
-        patterns = ('openjph*.lib',)
+        patterns = ('ojph*.lib',)
     else:
-        patterns = ('libopenjph*.a',)
+        patterns = ('libojph*.a',)
     for libsubdir in ('lib', 'lib64'):
         libdir = os.path.join(install_dir, libsubdir)
         for pattern in patterns:
@@ -57,10 +58,11 @@ def _find_static_openjph(install_dir):
     return None
 
 
-# When a static OpenJPH has been prebuilt (e.g. by CI via
-# tools/build_openjph.py), link it directly so the wheel is self-contained.
-# Otherwise fall back to linking a system/conda ``openjph`` shared library,
-# which is how the editable dev/test builds work.
+# The primary configuration statically links the ojph fork of OpenJPH,
+# built from the subprojects/ojph submodule by tools/build_openjph.py
+# into ./openjph-install; the extension is then self-contained and fast,
+# with no runtime library to locate. Linking a shared libojph from the
+# environment remains available as a fallback for development setups.
 _install_dir = os.environ.get('OPENJPH_INSTALL_DIR')
 if not _install_dir:
     _default = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -75,9 +77,17 @@ if _static is not None:
     include_dirs.append(ojph_include_dir)
     extra_objects.append(ojph_archive)
 else:
-    # Link a system/conda OpenJPH shared library (>= 0.30.1). This is the path
-    # used by editable dev/test builds and by the conda-forge feedstock.
-    libraries.append('openjph')
+    # Link the shared ojph library (the ojph fork of OpenJPH, which is
+    # co-installable with upstream OpenJPH). When building inside a conda
+    # environment, point the compiler and the runtime loader at its
+    # lib/include explicitly, so the build works with a non-conda compiler
+    # as well.
+    libraries.append('ojph')
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix:
+        include_dirs.append(os.path.join(conda_prefix, 'include'))
+        library_dirs.append(os.path.join(conda_prefix, 'lib'))
+        runtime_library_dirs.append(os.path.join(conda_prefix, 'lib'))
 
 # Check for windows, add PREFIX/Library to the include dirs for compatibility with conda-forge
 # This doesn't really hurt...
@@ -93,13 +103,20 @@ if platform.system() == 'Windows':
 if platform.system() == 'Windows':
     extra_compile_args = ['/std:c++17']
 else:
-    extra_compile_args = ['-std=c++17']
+    # -O3 (over distutils' default -O2) is needed to auto-vectorize the
+    # contiguous per-dtype conversion loops in the bindings.
+    extra_compile_args = ['-std=c++17', '-O3']
+    # The clipping loops need SSE4.1 min/max to vectorize; x86-64-v2
+    # (Nehalem 2008 and later) is the same baseline conda-forge uses.
+    if platform.machine() in ('x86_64', 'AMD64'):
+        extra_compile_args.append('-march=x86-64-v2')
 
 ojph_module = Extension(
     'ojph.ojph_bindings',
     sources=['ojph/ojph_bindings.cpp'],
     include_dirs=include_dirs,
     library_dirs=library_dirs,
+    runtime_library_dirs=runtime_library_dirs,
     libraries=libraries,
     extra_objects=extra_objects,
     extra_compile_args=extra_compile_args
