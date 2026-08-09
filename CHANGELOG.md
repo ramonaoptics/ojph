@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-08-08
+
+- Port the extension from pybind11 to
+  [nanobind](https://github.com/wjakob/nanobind). Binding-layer call
+  overhead drops ~2.5× (≈240 → ≈100 ns per call), which is invisible in
+  end-to-end encode/decode times (the codec dominates by 3–4 orders of
+  magnitude) but keeps the wrapper on the actively developed binding
+  framework. Behavior is unchanged: all tests pass, including the
+  free-threaded (3.13t/3.14t) suite — nanobind declares the module
+  GIL-free when built against a free-threaded CPython. Building from
+  source now requires `nanobind >= 2.2` instead of `pybind11`.
+
 ## [0.10.0] - 2026-08-08
 
 - Add `wavelet=` to `imwrite` / `imwrite_to_memory`, accepting `'irv97'`,
