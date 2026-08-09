@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.10.0] - 2026-08-08
 
 - Add `wavelet=` to `imwrite` / `imwrite_to_memory`, accepting `'irv97'`,
   `'rev53'` (the Part 1 kernels, previously selected through `reversible=`),
@@ -36,6 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lifting steps signaled in the ATK marker segment rather than the kernel
   index (which is file-local in Part 2 and carries no meaning across
   files), so it is reliable for codestreams produced by other encoders.
+- The extension no longer links a system or conda OpenJPH. It now vendors
+  the [ojph fork of OpenJPH](https://github.com/hmaarrfk/OpenJPH/tree/ojph)
+  as a git submodule (`subprojects/ojph`) and links it statically, so the
+  new wavelet kernels and encoder optimizations ship in every wheel with
+  no runtime dependency. Building from source requires `cmake` and the
+  submodule (`git clone --recursive`, or run `tools/build_openjph.py`);
+  linking a shared `libojph` remains available as a development fallback.
+- Large encode/decode speedups beyond the wavelet work: dtype-specialized
+  ingest/output loops, a 16-bit internal line pipeline for low-bit-depth
+  predict-only encodes, zero-row codeblock elision, and fused single-pass
+  transforms. On 4096×4096 uint8 masks, encode is ~2.7× and decode ~1.9×
+  faster than ojph 0.9.1, and reduced-resolution reads
+  (`imread(level=2)`) drop to ~0.5 ms.
 - The vendored OpenJPH fork's SIMD kernels are now implemented with
   [Google Highway](https://github.com/google/highway) (plus three
   hand-tuned AVX2 routines that measured faster), replacing the previous
