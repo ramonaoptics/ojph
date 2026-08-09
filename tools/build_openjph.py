@@ -73,10 +73,13 @@ def clone(source_dir: Path, url: str, ref: str) -> None:
     run(["git", "-C", source_dir, "checkout", "-q", "FETCH_HEAD"])
 
 
-def find_or_fetch_hwy(download_root: Path) -> Path:
-    """Locate the Google Highway headers, downloading a pinned release
-    into ``download_root`` when no installed copy is found. Returns the
-    include directory containing ``hwy/highway.h``."""
+def find_or_fetch_hwy(download_root: Path, jobs: int):
+    """Locate the Google Highway headers AND library, downloading and
+    building a pinned release when no installed copy is found. Since the
+    kernels use run-time dispatch (foreach_target), the hwy *library* is
+    required, not just the headers. Returns (include_dir, library_path);
+    library_path is None when an installed copy is used (CMake finds the
+    library beside the headers)."""
     candidates = []
     if os.environ.get("OJPH_HWY_INCLUDE_DIR"):
         candidates.append(Path(os.environ["OJPH_HWY_INCLUDE_DIR"]))
@@ -87,8 +90,8 @@ def find_or_fetch_hwy(download_root: Path) -> Path:
     candidates += [Path("/usr/local/include"), Path("/usr/include")]
     for cand in candidates:
         if (cand / "hwy" / "highway.h").is_file():
-            print(f"Using Google Highway headers from {cand}", flush=True)
-            return cand
+            print(f"Using Google Highway from {cand}", flush=True)
+            return cand, None
 
     src = download_root / f"highway-{HWY_VERSION}"
     if not (src / "hwy" / "highway.h").is_file():
@@ -102,12 +105,58 @@ def find_or_fetch_hwy(download_root: Path) -> Path:
         tarball.unlink()
     if not (src / "hwy" / "highway.h").is_file():
         raise RuntimeError(f"Highway download did not produce {src}/hwy/highway.h")
-    print(f"Using Google Highway headers from {src}", flush=True)
-    return src
+
+    # Build the static hwy library so the wheel stays self-contained
+    # (no runtime libhwy dependency).
+    build_dir = download_root / f"highway-build-{HWY_VERSION}"
+    lib_names = ("hwy.lib", "libhwy.a")
+    def _find_lib():
+        for name in lib_names:
+            p = build_dir / name
+            if p.is_file():
+                return p
+        return None
+    if _find_lib() is None:
+        args = [
+            "cmake", "-S", src, "-B", build_dir,
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DBUILD_SHARED_LIBS=OFF",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+            "-DBUILD_TESTING=OFF",
+            "-DHWY_ENABLE_EXAMPLES=OFF",
+            "-DHWY_ENABLE_CONTRIB=OFF",
+            "-DHWY_ENABLE_TESTS=OFF",
+        ]
+        if os.name == "nt":
+            args += ["-G", os.environ.get("CMAKE_GENERATOR", "Ninja")]
+            if shutil.which("cl"):
+                args += ["-DCMAKE_C_COMPILER=cl", "-DCMAKE_CXX_COMPILER=cl"]
+        if sys.platform == "darwin" and os.environ.get("CMAKE_OSX_ARCHITECTURES"):
+            args.append(
+                f"-DCMAKE_OSX_ARCHITECTURES={os.environ['CMAKE_OSX_ARCHITECTURES']}"
+            )
+        if os.environ.get("MACOSX_DEPLOYMENT_TARGET"):
+            args.append(
+                f"-DCMAKE_OSX_DEPLOYMENT_TARGET={os.environ['MACOSX_DEPLOYMENT_TARGET']}"
+            )
+        run(args)
+        run(["cmake", "--build", build_dir, "--config", "Release",
+             "--parallel", str(jobs), "--target", "hwy"])
+        # Multi-config generators (VS) put the archive under Release/
+        if _find_lib() is None:
+            for name in lib_names:
+                p = build_dir / "Release" / name
+                if p.is_file():
+                    p.replace(build_dir / name)
+    lib = _find_lib()
+    if lib is None:
+        raise RuntimeError("building the static Highway library failed")
+    print(f"Using Google Highway from {src} (static {lib.name})", flush=True)
+    return src, lib
 
 
 def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path,
-                    hwy_include) -> None:
+                    hwy_include, hwy_library) -> None:
     args = [
         "cmake",
         "-S", source_dir,
@@ -131,6 +180,8 @@ def cmake_configure(source_dir: Path, build_dir: Path, prefix: Path,
             # back to the scalar kernels.
             "-DOJPH_REQUIRE_HWY=ON",
         ]
+    if hwy_library is not None:
+        args.append(f"-DOJPH_HWY_LIBRARY={hwy_library}")
 
     osx_archs = os.environ.get("CMAKE_OSX_ARCHITECTURES")
     if sys.platform == "darwin" and osx_archs:
@@ -224,17 +275,25 @@ def main() -> int:
     # platforms (or an explicit OJPH_ALLOW_NO_HWY=1) fall back to the
     # fork's auto-detection.
     if os.environ.get("OJPH_ALLOW_NO_HWY") == "1":
-        hwy_include = None
+        hwy_include, hwy_library = None, None
     elif sys.platform.startswith(("linux", "darwin", "win")):
-        hwy_include = find_or_fetch_hwy(PROJECT_ROOT / "build")
+        hwy_include, hwy_library = find_or_fetch_hwy(PROJECT_ROOT / "build",
+                                                     args.jobs)
     else:
-        hwy_include = None
+        hwy_include, hwy_library = None, None
 
     # Reconfigure from scratch so stale cache (e.g. a prior arch) never leaks in.
     if build_dir.exists():
         shutil.rmtree(build_dir)
-    cmake_configure(source_dir, build_dir, prefix, hwy_include)
+    cmake_configure(source_dir, build_dir, prefix, hwy_include, hwy_library)
     cmake_build_install(build_dir, args.jobs)
+
+    # Place the static hwy archive beside libojph so setup.py links both
+    # into the extension (the hwy kernels dispatch through the library).
+    if hwy_library is not None:
+        libdir = prefix / "lib"
+        libdir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(hwy_library, libdir / hwy_library.name)
 
     # Sanity check: the static archive and headers must exist where setup.py looks.
     libdir_candidates = [prefix / "lib", prefix / "lib64"]

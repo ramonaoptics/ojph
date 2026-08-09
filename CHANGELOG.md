@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-08-09
+
+- Update the vendored ojph fork to 1.1.0, whose SIMD kernels are now a
+  Highway "fat binary": one kernel source compiled for SSE4.1, AVX2, and
+  three AVX-512 tiers, selected at run time per CPU. Machines with
+  AVX-512 (e.g. Sapphire Rapids Xeons, Zen 4+) gain roughly 8–10% encode
+  and 7% decode end-to-end over the previous AVX2-only dispatch, with up
+  to 2× on individual wavelet kernels; pre-AVX2 machines (2008–2012 era)
+  regain vectorized kernels via the SSE4.1 tier. Every dispatch choice is
+  measurement-derived (validated on Arrow Lake, Sapphire Rapids, Zen 3,
+  and Zen 2, with byte-identical codestreams on every target).
+- The irreversible 9/7 (`wavelet='irv97'`) path is substantially faster:
+  a float→integer conversion kernel had been left scalar during the SIMD
+  rework, costing up to 75% on decode; it is now vectorized and the whole
+  irv97 path measures at or better than it ever has (4096² mask decode
+  22.5 → 12.8 ms).
+- rev53 was audited end-to-end against upstream OpenJPH and measures
+  faster on every operation (encode up to 35%); two small dispatch
+  overheads found in the audit are fixed.
+- Building from source now needs the Google Highway *library* (the
+  kernels dispatch through it at run time), not just headers:
+  `tools/build_openjph.py` uses the environment's libhwy when installed,
+  and otherwise downloads Highway 1.4.0 and builds a static copy that is
+  linked into the extension — wheels remain fully self-contained with no
+  new runtime dependency.
+
 ## [0.10.1] - 2026-08-08
 
 - Port the extension from pybind11 to

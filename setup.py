@@ -84,6 +84,35 @@ if _static is not None:
     print(f"setup.py: statically linking OpenJPH from {ojph_archive}")
     include_dirs.append(ojph_include_dir)
     extra_objects.append(ojph_archive)
+    # The hwy kernels dispatch at run time through the Google Highway
+    # library. Wheel builds drop a static hwy archive beside libojph
+    # (tools/build_openjph.py); conda/dev builds link the environment's
+    # shared libhwy instead.
+    _hwy_archives = []
+    for _libsubdir in ('lib', 'lib64'):
+        for _pat in ('libhwy*.a', 'hwy.lib'):
+            _hwy_archives += sorted(
+                glob.glob(os.path.join(_install_dir, _libsubdir, _pat)))
+    if _hwy_archives:
+        print(f"setup.py: statically linking Highway from {_hwy_archives[0]}")
+        extra_objects.append(_hwy_archives[0])
+    else:
+        # Only link -lhwy when a libhwy is actually present (a build made
+        # with OJPH_ALLOW_NO_HWY has no hwy references at all).
+        _hwy_dirs = []
+        conda_prefix = os.environ.get('CONDA_PREFIX')
+        if conda_prefix:
+            _hwy_dirs += [os.path.join(conda_prefix, 'lib'),
+                          os.path.join(conda_prefix, 'Library', 'lib')]
+        _hwy_dirs += ['/usr/local/lib', '/usr/lib', '/usr/lib/x86_64-linux-gnu']
+        for _d in _hwy_dirs:
+            if glob.glob(os.path.join(_d, 'libhwy.*')) or \
+               glob.glob(os.path.join(_d, 'hwy.lib')):
+                libraries.append('hwy')
+                library_dirs.append(_d)
+                if platform.system() != 'Windows':
+                    runtime_library_dirs.append(_d)
+                break
 else:
     # Link the shared ojph library (the ojph fork of OpenJPH, which is
     # co-installable with upstream OpenJPH). When building inside a conda
