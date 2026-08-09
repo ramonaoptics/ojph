@@ -81,7 +81,7 @@ jobs:
           abi="cp$(echo '${{ matrix.python-version }}' | tr -d .)"
           conda install --quiet --yes \
             "python_abi=${{ matrix.python-version }}=*_$abi" \
-            compilers pybind11 numpy setuptools pytest cmake ninja libhwy
+            compilers nanobind numpy setuptools pytest cmake ninja libhwy
           python tools/build_openjph.py
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
@@ -110,7 +110,7 @@ jobs:
           # See the Unix step: pin the GIL-enabled ABI so the interpreter under
           # test matches the job name.
           $abi = "cp" + "${{ matrix.python-version }}".Replace(".", "")
-          conda install --yes --quiet "python_abi=${{ matrix.python-version }}=*_$abi" compilers pybind11 numpy setuptools pytest git cmake ninja libhwy
+          conda install --yes --quiet "python_abi=${{ matrix.python-version }}=*_$abi" compilers nanobind numpy setuptools pytest git cmake ninja libhwy
           python tools/build_openjph.py
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check
           python --version
@@ -178,7 +178,7 @@ jobs:
           abi="cp$(echo '${{ matrix.python-version }}' | tr -d .)t"
           conda install --quiet --yes \
             "python_abi=${{ matrix.python-version }}=*_$abi" \
-            compilers pybind11 numpy setuptools pytest cmake ninja libhwy
+            compilers nanobind numpy setuptools pytest cmake ninja libhwy
           conda list
           python tools/build_openjph.py
           python -m pip install -e . -vvv --no-deps --no-build-isolation --disable-pip-version-check

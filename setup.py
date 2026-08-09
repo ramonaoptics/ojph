@@ -1,10 +1,10 @@
 import glob
 import platform
 import sys
+import sysconfig
 import os
 from setuptools import setup, find_packages, Extension
-# Hmm consider nanobind
-import pybind11
+import nanobind
 
 with open('README.md', 'r', encoding='utf-8') as fh:
     readme = fh.read()
@@ -25,8 +25,16 @@ def get_version_and_cmdclass(pkg_path):
 
 version, cmdclass = get_version_and_cmdclass("ojph")
 
-# Include the pybind11 include directory
-include_dirs = [pybind11.get_include()]
+# nanobind ships as headers plus a small support library that is compiled
+# into the extension (see ojph/nanobind_support.cpp). robin_map is nanobind's
+# vendored hash-table dependency; the src dir is on the include path so the
+# support shim can reach nb_combined.cpp.
+_nanobind_root = os.path.dirname(os.path.abspath(nanobind.__file__))
+include_dirs = [
+    os.path.join(_nanobind_root, 'include'),
+    os.path.join(_nanobind_root, 'ext', 'robin_map', 'include'),
+    os.path.join(_nanobind_root, 'src'),
+]
 library_dirs = []
 runtime_library_dirs = []
 libraries = []
@@ -97,7 +105,7 @@ if platform.system() == 'Windows':
     include_dirs.append(os.path.join(prefix, 'Library', 'include'))
     library_dirs.append(os.path.join(prefix, 'Library', 'lib'))
 
-# pybind11 (and OpenJPH's headers) require a modern C++ standard. Some
+# nanobind (and OpenJPH's headers) require a modern C++ standard. Some
 # compilers -- notably AppleClang -- still default to an ancient standard when
 # none is given, so request C++17 explicitly rather than relying on the default.
 if platform.system() == 'Windows':
@@ -111,15 +119,30 @@ else:
     if platform.machine() in ('x86_64', 'AMD64'):
         extra_compile_args.append('-march=x86-64-v2')
 
+define_macros = [
+    # Cheap nanobind-internal assertions only; full checks are for debugging.
+    ('NB_COMPACT_ASSERTIONS', None),
+]
+if platform.system() == 'Windows':
+    # The amalgamated nanobind support build includes <windows.h> (via the
+    # free-threading code in nb_internals.cpp) ahead of translation units
+    # that use std::max, so the min/max macros must be suppressed.
+    define_macros.append(('NOMINMAX', None))
+if sysconfig.get_config_var('Py_GIL_DISABLED'):
+    # Free-threaded CPython: nanobind then declares Py_MOD_GIL_NOT_USED for
+    # the module, so the interpreter keeps the GIL disabled at import.
+    define_macros.append(('NB_FREE_THREADED', None))
+
 ojph_module = Extension(
     'ojph.ojph_bindings',
-    sources=['ojph/ojph_bindings.cpp'],
+    sources=['ojph/ojph_bindings.cpp', 'ojph/nanobind_support.cpp'],
     include_dirs=include_dirs,
     library_dirs=library_dirs,
     runtime_library_dirs=runtime_library_dirs,
     libraries=libraries,
     extra_objects=extra_objects,
-    extra_compile_args=extra_compile_args
+    extra_compile_args=extra_compile_args,
+    define_macros=define_macros
 )
 
 setup(
