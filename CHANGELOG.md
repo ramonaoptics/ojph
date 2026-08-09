@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lifting steps signaled in the ATK marker segment rather than the kernel
   index (which is file-local in Part 2 and carries no meaning across
   files), so it is reliable for codestreams produced by other encoders.
+- The vendored OpenJPH fork's SIMD kernels are now implemented with
+  [Google Highway](https://github.com/google/highway) (plus three
+  hand-tuned AVX2 routines that measured faster), replacing the previous
+  per-instruction-set implementations. On a 4096×4096 uint8 mask this
+  roughly halves encode time and cuts decode time ~20% versus the
+  upstream SIMD. Highway is a hard *build* dependency on Linux, Windows,
+  and macOS: `tools/build_openjph.py` uses installed headers (conda-forge
+  `libhwy`) when present and otherwise downloads a pinned Highway release
+  — it is header-only for this use, so wheels and installed extensions
+  gain no runtime dependency.
 
 ## [0.9.1] - 2026-08-04
 
