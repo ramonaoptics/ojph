@@ -1,7 +1,7 @@
 [build-system]
 # pybind11 >= 2.13 provides py::mod_gil_not_used(), which the extension needs to
 # keep the GIL disabled on free-threaded (cp313t/cp314t) interpreters.
-requires = ["setuptools>=42", "wheel", "pybind11>=2.13"]
+requires = ["setuptools>=42", "wheel", "nanobind>=2.2"]
 build-backend = "setuptools.build_meta"
 
 [tool.cibuildwheel]
