@@ -98,12 +98,16 @@ if _static is not None:
         extra_objects.append(_hwy_archives[0])
     else:
         # Only link -lhwy when a libhwy is actually present (a build made
-        # with OJPH_ALLOW_NO_HWY has no hwy references at all).
+        # with OJPH_ALLOW_NO_HWY has no hwy references at all). CONDA_PREFIX
+        # covers an activated developer environment; PREFIX is the host
+        # prefix under conda-build, which does not set CONDA_PREFIX for
+        # build scripts.
         _hwy_dirs = []
-        conda_prefix = os.environ.get('CONDA_PREFIX')
-        if conda_prefix:
-            _hwy_dirs += [os.path.join(conda_prefix, 'lib'),
-                          os.path.join(conda_prefix, 'Library', 'lib')]
+        for _env_var in ('CONDA_PREFIX', 'PREFIX'):
+            _env_prefix = os.environ.get(_env_var)
+            if _env_prefix:
+                _hwy_dirs += [os.path.join(_env_prefix, 'lib'),
+                              os.path.join(_env_prefix, 'Library', 'lib')]
         _hwy_dirs += ['/usr/local/lib', '/usr/lib', '/usr/lib/x86_64-linux-gnu']
         for _d in _hwy_dirs:
             if glob.glob(os.path.join(_d, 'libhwy.*')) or \
