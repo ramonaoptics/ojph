@@ -1,0 +1,273 @@
+name: libojph
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libojph-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref_type == 'branch' }}
+
+env:
+  HWY_VERSION: "1.4.0"
+
+jobs:
+  build:
+    name: libojph ${{ matrix.os }} ${{ matrix.library }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            library: shared
+            hwy: true
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            library: static
+            hwy: true
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
+            library: shared
+            hwy: false
+          - os: macos-latest
+            platform: macos-arm64
+            library: shared
+            hwy: false
+          - os: windows-latest
+            platform: windows-x86_64
+            library: shared
+            hwy: true
+          - os: windows-latest
+            platform: windows-x86_64
+            library: static
+            hwy: true
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      LIBRARY: ${{ matrix.library }}
+      USE_HWY: ${{ matrix.hwy }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history and tags: the library takes its version from git
+          # describe, as the Python package does.
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Compute the version string
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "OJPH_GIT_DESCRIBE=${GITHUB_REF_NAME}-0-g$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          else
+            echo "OJPH_GIT_DESCRIBE=$(git describe --tags --long --always)" >> "$GITHUB_ENV"
+          fi
+
+      - uses: lukka/get-cmake@16e8153a8b4918849d92aad131befe67a3705daa # v4.5.0
+        with:
+          useCloudCache: false
+
+      - name: Choose the generator and paths
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            work="$(cygpath -m "$RUNNER_TEMP")"
+          else
+            work="$RUNNER_TEMP"
+            echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+          fi
+          {
+            echo "WORK=$work"
+            echo "PREFIX=$work/prefix"
+            echo "HWY_PREFIX=$work/hwy"
+          } >> "$GITHUB_ENV"
+
+      - name: Restore the Google Highway build
+        # Release builds call this workflow from another one and build
+        # Google Highway from source instead of trusting a cache.
+        if: matrix.hwy && github.workflow == 'libojph'
+        id: hwy-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/hwy
+          key: hwy-${{ env.HWY_VERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/build_hwy.sh') }}
+
+      - name: Build Google Highway
+        if: matrix.hwy && steps.hwy-cache.outputs.cache-hit != 'true'
+        run: tools/build_hwy.sh "$HWY_VERSION" "$HWY_PREFIX" "$WORK/hwy-build"
+
+      - name: Configure, build and install libojph
+        run: |
+          args=(-S . -B build "-DCMAKE_INSTALL_PREFIX=$PREFIX")
+          if [ "$LIBRARY" = "static" ]; then
+            args+=(-DBUILD_SHARED_LIBS=OFF)
+          fi
+          if [ "$USE_HWY" = "true" ]; then
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              hwy_library="$HWY_PREFIX/lib/hwy.lib"
+            else
+              hwy_library="$HWY_PREFIX/lib/libhwy.a"
+            fi
+            args+=("-DOJPH_HWY_INCLUDE_DIR=$HWY_PREFIX/include"
+                   "-DOJPH_HWY_LIBRARY=$hwy_library"
+                   -DOJPH_REQUIRE_HWY=ON)
+          else
+            args+=(-DOJPH_ENABLE_HWY=OFF)
+          fi
+          cmake "${args[@]}"
+          cmake --build build --config Release --parallel
+          cmake --install build --config Release
+
+      - name: Check the install layout
+        run: |
+          cd "$PREFIX"
+          find . -type f -o -type l | LC_ALL=C sort
+          for header in ojph_arch.h ojph_arg.h ojph_base.h ojph_codestream.h \
+                        ojph_defs.h ojph_file.h ojph_mem.h ojph_message.h \
+                        ojph_params.h ojph_version.h; do
+            test -f "include/ojph/$header"
+          done
+          test -f lib/cmake/ojph/ojph-config.cmake
+          test -f lib/cmake/ojph/ojph-config-version.cmake
+          test -f lib/cmake/ojph/ojph-targets.cmake
+          test -f lib/pkgconfig/ojph.pc
+          case "$RUNNER_OS-$LIBRARY" in
+            Linux-shared) test -L lib/libojph.so && ls lib/libojph.so.* ;;
+            macOS-shared) test -L lib/libojph.dylib ;;
+            Windows-shared) test -f bin/ojph.dll && test -f lib/ojph.lib ;;
+            Windows-static) test -f lib/ojph.lib ;;
+            *) test -f lib/libojph.a ;;
+          esac
+          if ls bin/ojph_compress* bin/ojph_expand* 2> /dev/null; then
+            echo "the command line tools must not be installed" >&2
+            exit 1
+          fi
+
+      - name: Check that no Google Highway library is needed at run time
+        if: matrix.library == 'shared' && runner.os == 'Linux'
+        run: |
+          ldd "$PREFIX/lib/libojph.so"
+          if ldd "$PREFIX/lib/libojph.so" | grep -q hwy; then
+            exit 1
+          fi
+
+      - name: Build and run the CMake consumer against the install
+        run: |
+          cmake -S tests/consumer -B consumer-build "-DCMAKE_PREFIX_PATH=$PREFIX" \
+            | tee consumer-configure.log
+          cmake --build consumer-build --config Release
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            PATH="$(cygpath -u "$PREFIX/bin"):$PATH"
+          fi
+          ctest --test-dir consumer-build --build-config Release \
+            --output-on-failure --timeout 300
+
+      - name: Build and run the pkg-config consumer against the install
+        if: matrix.library == 'shared' && runner.os != 'Windows'
+        run: |
+          if ! command -v pkg-config > /dev/null; then
+            brew install pkgconf
+          fi
+          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          pkg-config --modversion ojph
+          read -r -a flags <<< "$(pkg-config --cflags --libs ojph)"
+          c++ -std=c++14 tests/consumer/roundtrip.cpp "${flags[@]}" \
+            "-Wl,-rpath,$PREFIX/lib" -o roundtrip-pkg-config
+          ./roundtrip-pkg-config
+
+      - name: Check that the library and the Python package agree on the version
+        if: matrix.os == 'ubuntu-latest' && matrix.library == 'shared'
+        run: |
+          python3 -m venv "$WORK/venv"
+          "$WORK/venv/bin/python" tools/build_openjph.py
+          "$WORK/venv/bin/python" -m pip install --quiet .
+          python_version="$(cd "$WORK" && "$WORK/venv/bin/python" -c 'import ojph; print(ojph.__version__)')"
+          pc_version="$(PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" pkg-config --modversion ojph)"
+          header_version="$(sed -n 's/^#define LIBOJPH_VERSION "\(.*\)"$/\1/p' "$PREFIX/include/ojph/libojph_version.h")"
+          cmake_version="$(sed -n 's/^-- Found ojph \([^ ]*\) in .*/\1/p' consumer-configure.log)"
+          numeric="$(echo "$python_version" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || echo 0.0.0)"
+          soname="$(basename "$(readlink "$PREFIX/lib/libojph.so")")"
+          printf '%-22s %s\n' \
+            "ojph.__version__" "$python_version" \
+            "ojph.pc" "$pc_version" \
+            "libojph_version.h" "$header_version" \
+            "CMake package" "$cmake_version" \
+            "library soname" "$soname"
+          test "$pc_version" = "$python_version"
+          test "$header_version" = "$python_version"
+          test "$cmake_version" = "$numeric"
+          test "$soname" = "libojph.so.${numeric%.*}"
+
+      - name: Install upstream OpenJPH into the same prefix
+        if: matrix.os == 'ubuntu-latest' && matrix.library == 'shared'
+        env:
+          OPENJPH_UPSTREAM_VERSION: "0.33.0"
+        run: |
+          curl --fail --silent --show-error --location --retry 5 \
+            "https://github.com/aous72/OpenJPH/archive/refs/tags/$OPENJPH_UPSTREAM_VERSION.tar.gz" \
+            | tar -xz -C "$WORK"
+          cmake -S "$WORK/OpenJPH-$OPENJPH_UPSTREAM_VERSION" -B upstream-build \
+            -DCMAKE_BUILD_TYPE=Release -DOJPH_ENABLE_TIFF_SUPPORT=OFF \
+            "-DCMAKE_INSTALL_PREFIX=$PREFIX"
+          cmake --build upstream-build --parallel
+          cmake --install upstream-build
+          LC_ALL=C sort build/install_manifest.txt > libojph-files.txt
+          LC_ALL=C sort upstream-build/install_manifest.txt > upstream-files.txt
+          shared="$(LC_ALL=C comm -12 libojph-files.txt upstream-files.txt)"
+          if [ -n "$shared" ]; then
+            echo "libojph and upstream OpenJPH install the same files:" >&2
+            echo "$shared" >&2
+            exit 1
+          fi
+          rm -rf consumer-build
+          cmake -S tests/consumer -B consumer-build "-DCMAKE_PREFIX_PATH=$PREFIX"
+          cmake --build consumer-build
+          ctest --test-dir consumer-build --output-on-failure
+
+      - name: Package the install
+        if: matrix.library == 'shared'
+        run: |
+          version="$(sed -n 's/^Version: //p' "$PREFIX/lib/pkgconfig/ojph.pc")"
+          name="libojph-$version-$PLATFORM"
+          mkdir -p dist
+          cp -R "$PREFIX" "$WORK/$name"
+          cp LICENSE.txt "$WORK/$name/LICENSE.txt"
+          cp subprojects/ojph/LICENSE "$WORK/$name/LICENSE.OpenJPH"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            (cd "$WORK" && cmake -E tar cf "$GITHUB_WORKSPACE/dist/$name.zip" --format=zip "$name")
+          else
+            (cd "$WORK" && cmake -E tar czf "$GITHUB_WORKSPACE/dist/$name.tar.gz" "$name")
+          fi
+          ls -l dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.library == 'shared'
+        with:
+          name: libojph-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  lint:
+    name: Lint the workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: actionlint
+        run: pipx run --spec actionlint-py==1.7.12.25 actionlint -color
+
+      - name: zizmor
+        run: pipx run zizmor==1.32.0 --offline --min-severity=low --format=github .github

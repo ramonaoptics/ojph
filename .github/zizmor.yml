@@ -1,0 +1,5 @@
+rules:
+  # GitHub's "$/" self-repository syntax is newer than actionlint, which
+  # rejects it, so local reusable workflows keep the "./" form.
+  self-repository:
+    disable: true
