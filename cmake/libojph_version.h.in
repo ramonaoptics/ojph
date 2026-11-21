@@ -1,0 +1,12 @@
+#ifndef LIBOJPH_VERSION_H
+#define LIBOJPH_VERSION_H
+
+/* The libojph release, the same as the version of the ojph Python package
+ * built from the same source.  OPENJPH_VERSION_* in ojph_version.h is the
+ * version of the OpenJPH codec that libojph is built from. */
+#define LIBOJPH_VERSION "@LIBOJPH_VERSION@"
+#define LIBOJPH_VERSION_MAJOR @LIBOJPH_VERSION_MAJOR@
+#define LIBOJPH_VERSION_MINOR @LIBOJPH_VERSION_MINOR@
+#define LIBOJPH_VERSION_PATCH @LIBOJPH_VERSION_PATCH@
+
+#endif

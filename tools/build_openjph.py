@@ -35,7 +35,7 @@ from pathlib import Path
 # Pinned to a released OpenJPH tag (>= 0.30.1, the minimum the bindings need)
 # so the wheels are reproducible. Bump it deliberately, not automatically.
 DEFAULT_GIT_URL = "https://github.com/hmaarrfk/OpenJPH.git"
-DEFAULT_GIT_REF = "ojph"
+DEFAULT_GIT_REF = "main"
 
 # Google Highway is a hard build dependency on Linux, Windows, and macOS:
 # without its headers the library silently falls back to generic (scalar)
