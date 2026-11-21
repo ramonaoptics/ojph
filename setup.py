@@ -39,6 +39,7 @@ library_dirs = []
 runtime_library_dirs = []
 libraries = []
 extra_objects = []
+libojph_define_macros = []
 
 
 def _find_static_openjph(install_dir):
@@ -66,6 +67,37 @@ def _find_static_openjph(install_dir):
     return None
 
 
+def _system_libojph():
+    """Return the compile and link flags of an installed libojph.
+
+    Reads them from pkg-config's ``ojph`` module (``ojph.pc``, installed by
+    the libojph package). ``PKG_CONFIG`` names the pkg-config executable.
+    """
+    import shlex
+    import shutil
+    import subprocess
+
+    pkg_config = os.environ.get('PKG_CONFIG') or shutil.which('pkg-config')
+    if not pkg_config:
+        raise RuntimeError(
+            'OJPH_SYSTEM_LIBOJPH=1 needs pkg-config to find libojph')
+
+    def query(*flags):
+        return subprocess.run(
+            [pkg_config, *flags, 'ojph'], check=True, capture_output=True,
+            text=True).stdout
+
+    version = query('--modversion').strip()
+    print(f"setup.py: linking the installed libojph {version}")
+    split = shlex.split if os.name != 'nt' else str.split
+    return split(query('--cflags')), split(query('--libs'))
+
+
+# OJPH_SYSTEM_LIBOJPH=1 links an installed shared libojph, found with
+# pkg-config, instead of a static OpenJPH from tools/build_openjph.py.
+# Packagers that ship libojph separately use it; the wheels do not.
+_use_system_libojph = os.environ.get('OJPH_SYSTEM_LIBOJPH') == '1'
+
 # The primary configuration statically links the ojph fork of OpenJPH,
 # built from the subprojects/ojph submodule by tools/build_openjph.py
 # into ./openjph-install; the extension is then self-contained and fast,
@@ -78,8 +110,36 @@ if not _install_dir:
     if os.path.isdir(_default):
         _install_dir = _default
 
-_static = _find_static_openjph(_install_dir) if _install_dir else None
-if _static is not None:
+_static = None
+if _install_dir and not _use_system_libojph:
+    _static = _find_static_openjph(_install_dir)
+if _use_system_libojph:
+    _cflags, _libs = _system_libojph()
+    for _flag in _cflags:
+        if _flag.startswith('-I'):
+            include_dirs.append(_flag[2:])
+        elif _flag.startswith('-D'):
+            _name, _, _value = _flag[2:].partition('=')
+            libojph_define_macros.append((_name, _value or None))
+    for _flag in _libs:
+        if _flag.startswith('-L'):
+            library_dirs.append(_flag[2:])
+            if platform.system() != 'Windows':
+                runtime_library_dirs.append(_flag[2:])
+        elif _flag.startswith('-l'):
+            libraries.append(_flag[2:])
+    if platform.system() == 'Windows' and 'ojph' in libraries:
+        # On MSVC libojph is named ojph.<major>.<minor>.lib, while ojph.pc
+        # says -lojph.
+        for _d in library_dirs:
+            if os.path.isfile(os.path.join(_d, 'ojph.lib')):
+                break
+            _versioned = sorted(glob.glob(os.path.join(_d, 'ojph.*.lib')))
+            if _versioned:
+                libraries[libraries.index('ojph')] = \
+                    os.path.basename(_versioned[-1])[:-len('.lib')]
+                break
+elif _static is not None:
     ojph_include_dir, ojph_archive = _static
     print(f"setup.py: statically linking OpenJPH from {ojph_archive}")
     include_dirs.append(ojph_include_dir)
@@ -156,6 +216,7 @@ define_macros = [
     # Cheap nanobind-internal assertions only; full checks are for debugging.
     ('NB_COMPACT_ASSERTIONS', None),
 ]
+define_macros += libojph_define_macros
 if platform.system() == 'Windows':
     # The amalgamated nanobind support build includes <windows.h> (via the
     # free-threading code in nb_internals.cpp) ahead of translation units
