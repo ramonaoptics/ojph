@@ -3,7 +3,7 @@ name: Build wheels
 on:
   push:
     branches:
-      - main
+      - '**'
     tags:
       # Only publish proper PEP 440 version tags. Final releases (0.8.0) and
       # release candidates (0.8.0rc1) build + publish; anything else is ignored.
