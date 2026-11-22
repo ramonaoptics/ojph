@@ -41,6 +41,8 @@ def imwrite_to_memory(
     tlm_marker=True,
     tileparts_at_resolutions=None,
     tileparts_at_components=None,
+    bit_depth=None,
+    is_signed=None,
 ):
     mem_outfile = MemOutfile()
     mem_outfile.open(65536, False)
@@ -58,6 +60,8 @@ def imwrite_to_memory(
         tlm_marker=tlm_marker,
         tileparts_at_resolutions=tileparts_at_resolutions,
         tileparts_at_components=tileparts_at_components,
+        bit_depth=bit_depth,
+        is_signed=is_signed,
     )
     data = bytes(mem_outfile.get_data())
     codestream.close()
@@ -79,6 +83,8 @@ def imwrite(
     tlm_marker=True,
     tileparts_at_resolutions=None,
     tileparts_at_components=None,
+    bit_depth=None,
+    is_signed=None,
 ):
     # Auto-detect channel order if not provided
     if channel_order is None:
@@ -123,8 +129,23 @@ def imwrite(
     else:
         num_components = 1
 
-    bit_depth = image.dtype.itemsize * 8
-    is_signed = image.dtype.kind != 'u'
+    check_range = bit_depth is not None or is_signed is not None
+    if is_signed is None:
+        is_signed = image.dtype.kind != 'u'
+    if bit_depth is None:
+        bit_depth = image.dtype.itemsize * 8
+    if check_range and image.size:
+        # The codestream holds bit_depth bits per sample; a value outside
+        # that range would not round-trip.
+        low = -(1 << (bit_depth - 1)) if is_signed else 0
+        high = (1 << (bit_depth - 1)) - 1 if is_signed else (1 << bit_depth) - 1
+        minimum, maximum = int(image.min()), int(image.max())
+        if minimum < low or maximum > high:
+            raise ValueError(
+                f"The image holds values from {minimum} to {maximum}, which "
+                f"{bit_depth} {'signed' if is_signed else 'unsigned'} bits "
+                f"cannot hold ({low} to {high})."
+            )
     siz.set_num_components(num_components)
     for i in range(num_components):
         siz.set_component(
