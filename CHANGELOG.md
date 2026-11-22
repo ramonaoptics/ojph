@@ -5,27 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.0] - 2026-11-22
 
 - `imwrite` and `imwrite_to_memory` take `bit_depth=` and `is_signed=`, to
   store an integer image at fewer bits than its dtype, or with the other
   signedness. Values that the declared bit depth cannot hold raise a
   `ValueError`. The image's dtype is then recorded in a comment (COM)
-  marker segment, `ojph dtype=<name>`, and `imread` returns that dtype. A small signed bit depth also avoids the level shift that
-  turns a zero background into a constant, so sparse content compresses
-  smaller.
+  marker segment, `ojph dtype=<name>`, and `imread` returns that dtype.
+  A small signed bit depth also avoids the level shift that turns a zero
+  background into a constant, so sparse content compresses smaller.
 - Codestreams of any bit depth up to 32 can be read: without that
   comment, the dtype is the smallest of 8, 16 or 32 bits that holds it.
 - `Codestream.write_headers` takes its `comments` as a sequence of `str`,
   written as Latin COM marker segments; it could not take any from Python
-  before. `read_image(out=...)` and
-  `imread_from_memory(out=...)` accept an `out` of any 8, 16 or 32-bit
-  integer dtype, and saturate the samples to its range.
+  before.
+- `read_image(out=...)` and `imread_from_memory(out=...)` accept an `out`
+  of any 8, 16 or 32-bit integer dtype, and saturate the samples to its
+  range.
 - Single-component decodes write each row straight into the output
   through the vendored fork's `codestream::pull_into`, instead of
   narrowing a 32-bit row: up to twice as fast on sparse content.
   Signed predict-only codestreams of low bit depth also decode in 16-bit
   lines now.
+- `OJPH_SYSTEM_LIBOJPH=1` builds the extension against an installed shared
+  libojph 1.2.0 or newer, found with pkg-config (`ojph.pc`), instead of the
+  vendored copy; packagers that ship libojph separately use it. The wheels
+  still bundle a static copy.
+- The vendored OpenJPH fork is at its `ojph-1.2.0` tag.
+- The CI's macOS jobs run on `macos-15`.
 
 ## [0.10.2] - 2026-08-09
 
