@@ -10,11 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `imwrite` and `imwrite_to_memory` take `bit_depth=` and `is_signed=`, to
   store an integer image at fewer bits than its dtype, or with the other
   signedness. Values that the declared bit depth cannot hold raise a
-  `ValueError`. A small signed bit depth also avoids the level shift that
+  `ValueError`. The image's dtype is then recorded in a comment (COM)
+  marker segment, `ojph dtype=<name>`, and `imread` returns that dtype. A small signed bit depth also avoids the level shift that
   turns a zero background into a constant, so sparse content compresses
   smaller.
-- Codestreams of any bit depth up to 32 can be read: the dtype is the
-  smallest of 8, 16 or 32 bits that holds it. `read_image(out=...)` and
+- Codestreams of any bit depth up to 32 can be read: without that
+  comment, the dtype is the smallest of 8, 16 or 32 bits that holds it.
+- `Codestream.write_headers` takes its `comments` as a sequence of `str`,
+  written as Latin COM marker segments; it could not take any from Python
+  before. `read_image(out=...)` and
   `imread_from_memory(out=...)` accept an `out` of any 8, 16 or 32-bit
   integer dtype, and saturate the samples to its range.
 - Single-component decodes write each row straight into the output

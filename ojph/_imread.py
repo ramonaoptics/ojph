@@ -4,6 +4,40 @@ from warnings import warn
 from .ojph_bindings import J2CInfile, MemInfile, Codestream
 
 
+DTYPE_COMMENT = "ojph dtype="
+# The main header of the codestreams imwrite writes is a few hundred bytes.
+_HEADER_READ_BYTES = 4096
+
+
+def _dtype_from_comments(header):
+    """The dtype a COM marker segment of the main header names, or None.
+
+    ``header`` holds the codestream from its SOC marker, at least as far as
+    the first SOT marker or the end of the data.
+    """
+    header = bytes(header)
+    if header[:2] != b"\xff\x4f":
+        return None
+    position = 2
+    while position + 4 <= len(header):
+        marker = header[position:position + 2]
+        if marker[0] != 0xFF or marker == b"\xff\x90":
+            return None
+        length = int.from_bytes(header[position + 2:position + 4], "big")
+        if marker == b"\xff\x64" and length >= 4:
+            text = header[position + 6:position + 2 + length]
+            prefix = DTYPE_COMMENT.encode()
+            if text.startswith(prefix):
+                try:
+                    dtype = np.dtype(text[len(prefix):].decode("ascii"))
+                except (TypeError, UnicodeDecodeError):
+                    return None
+                if dtype.kind in "iu" and dtype.itemsize in (1, 2, 4):
+                    return dtype
+        position += 2 + length
+    return None
+
+
 def _dtype_for(bit_depth, is_signed):
     for bits in (8, 16, 32):
         if bit_depth <= bits:
@@ -133,6 +167,11 @@ class OJPHImageFile:
                 self._shape = (self._num_components,) + self._shape
 
         self._dtype = _dtype_for(siz.get_bit_depth(0), siz.is_signed(0))
+        if not self._is_mem_file:
+            with open(filename, "rb") as f:
+                f.seek(0 if offset is None else offset)
+                header = f.read(_HEADER_READ_BYTES)
+            self._dtype = _dtype_from_comments(header) or self._dtype
 
     @classmethod
     def from_memory(cls, data, *, channel_order=None, offset=None):
@@ -190,6 +229,11 @@ class OJPHImageFile:
                 instance._shape = (instance._num_components,) + instance._shape
 
         instance._dtype = _dtype_for(siz.get_bit_depth(0), siz.is_signed(0))
+        start = 0 if offset is None else offset
+        instance._dtype = (
+            _dtype_from_comments(data[start:start + _HEADER_READ_BYTES])
+            or instance._dtype
+        )
 
         return instance
 

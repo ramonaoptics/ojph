@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ojph import imread_from_memory, imwrite_to_memory
+from ojph import imread, imread_from_memory, imwrite, imwrite_to_memory
 from ojph._imread import OJPHImageFile
 from ojph.ojph_bindings import read_j2c_into
 
@@ -19,7 +19,7 @@ from ojph.ojph_bindings import read_j2c_into
     ],
 )
 @pytest.mark.parametrize('wavelet', ['rev12', 'rev53'])
-def test_declared_bit_depth_round_trips(dtype, low, high, bit_depth, is_signed, wavelet):
+def test_declared_bit_depth_round_trips(tmp_path, dtype, low, high, bit_depth, is_signed, wavelet):
     rng = np.random.default_rng(0)
     image = rng.integers(low, high + 1, size=(67, 131), dtype=dtype)
     image[0, 0], image[-1, -1] = low, high
@@ -28,10 +28,27 @@ def test_declared_bit_depth_round_trips(dtype, low, high, bit_depth, is_signed, 
         bit_depth=bit_depth, is_signed=is_signed,
     )
 
-    reader = OJPHImageFile.from_memory(np.frombuffer(data, dtype=np.uint8))
+    decoded = imread_from_memory(data)
+    assert decoded.dtype == dtype
+    np.testing.assert_array_equal(decoded, image)
+
+    path = tmp_path / 'image.j2c'
+    imwrite(path, image, wavelet=wavelet, num_decompositions=3,
+            bit_depth=bit_depth, is_signed=is_signed)
+    decoded = imread(path)
+    assert decoded.dtype == dtype
+    np.testing.assert_array_equal(decoded, image)
+
+    comment = f"ojph dtype={np.dtype(dtype).name}".encode()
+    raw = bytes(data)
+    start = raw.index(comment) - 6
+    length = int.from_bytes(raw[start + 2:start + 4], 'big')
+    without_comment = np.frombuffer(raw[:start] + raw[start + 2 + length:], dtype=np.uint8)
+    reader = OJPHImageFile.from_memory(without_comment)
     assert reader.dtype.kind == ('i' if is_signed else 'u')
     assert reader.dtype.itemsize == (1 if bit_depth <= 8 else 2 if bit_depth <= 16 else 4)
-    np.testing.assert_array_equal(imread_from_memory(data), image)
+    np.testing.assert_array_equal(
+        imread_from_memory(without_comment, out=np.empty_like(image)), image)
 
     out = np.empty_like(image)
     assert imread_from_memory(data, out=out) is not None
