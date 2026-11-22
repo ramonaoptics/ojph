@@ -2,6 +2,7 @@ import numpy as np
 import inspect
 from collections.abc import Buffer
 
+from ._imread import DTYPE_COMMENT
 from .ojph_bindings import Codestream, J2COutfile, MemOutfile, Point
 
 
@@ -215,7 +216,10 @@ def imwrite(
     codestream.set_tilepart_divisions(tileparts_at_resolutions, tileparts_at_components)
     codestream.request_tlm_marker(tlm_marker)
 
-    codestream.write_headers(ojph_file, None, 0)
+    # A declared bit depth or signedness loses the image's dtype, so it is
+    # recorded in a comment that imread reads back.
+    comments = [f"{DTYPE_COMMENT}{image.dtype.name}"] if check_range else None
+    codestream.write_headers(ojph_file, comments)
 
     # For native byte orders, even if the byte order of the input is
     # explicitely set

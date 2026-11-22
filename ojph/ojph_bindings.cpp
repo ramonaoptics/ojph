@@ -4,6 +4,7 @@
 #include <nanobind/stl/pair.h>
 #include <limits>
 #include <string>
+#include <vector>
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
@@ -366,11 +367,23 @@ NB_MODULE(ojph_bindings, m) {
         .def("is_tlm_requested", &codestream::is_tlm_requested)
         .def("write_headers",
              [](codestream &self, outfile_base *file, nb::object comments, ui32 num_comments) {
-                 // Check if the comments argument is None and convert it to nullptr if so
-                 const comment_exchange* comments_ptr = comments.is_none()
-                     ? nullptr : nb::cast<const comment_exchange*>(comments);
+                 // comments: None, or a sequence of str written as Latin
+                 // (Rcom = 1) COM marker segments. num_comments is kept for
+                 // compatibility and ignored.
+                 (void)num_comments;
+                 std::vector<std::string> texts;
+                 if (!comments.is_none())
+                     for (nb::handle comment : comments) {
+                         texts.push_back(nb::cast<std::string>(comment));
+                         if (texts.back().size() > 65531)
+                             throw nb::value_error("a comment holds at most 65531 bytes");
+                     }
+                 std::vector<comment_exchange> exchanges(texts.size());
+                 for (size_t i = 0; i < texts.size(); ++i)
+                     exchanges[i].set_string(texts[i].c_str());
                  nb::gil_scoped_release release;
-                 self.write_headers(file, comments_ptr, num_comments);
+                 self.write_headers(file, exchanges.empty() ? nullptr : exchanges.data(),
+                                    (ui32)exchanges.size());
              },
              nb::arg("file"), nb::arg("comments") = nb::none(), nb::arg("num_comments") = 0)
         .def("exchange",
