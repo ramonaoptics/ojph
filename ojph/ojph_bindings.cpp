@@ -194,6 +194,24 @@ inline size_t tlm_bytes_to_read(const ui8* buf, size_t header_size,
   return header_size + cum;
 }
 
+// True when codestream::pull_into can write a row straight into the output:
+// contiguous columns, and either no clipping or the clipping that pull_into's
+// saturation to the output type already applies.
+inline bool rows_pull_into(size_t element_size, bool is_unsigned,
+                           size_t col_stride, bool do_clip,
+                           si32 min_val, si32 max_val) {
+  if (col_stride != element_size)
+    return false;
+  if (!do_clip)
+    return true;
+  if (element_size >= 4)
+    return false;
+  int bits = (int)element_size * 8;
+  si64 low = is_unsigned ? 0 : -((si64)1 << (bits - 1));
+  si64 high = is_unsigned ? ((si64)1 << bits) - 1 : ((si64)1 << (bits - 1)) - 1;
+  return min_val == low && max_val == high;
+}
+
 // Pull every decoded line of a single component into a 2D output buffer, with
 // optional clipping. Shared by read_j2c_into and read_j2c_fd_into. Must be
 // called with the GIL released.
@@ -202,6 +220,13 @@ inline void pull_single_component_into(
     size_t row_stride, size_t element_size, bool is_unsigned,
     bool do_clip, si32 min_val, si32 max_val) {
   ui32 comp = 0;
+  if (rows_pull_into(element_size, is_unsigned, element_size, do_clip,
+                     min_val, max_val)) {
+    for (size_t r = 0; r < rows; ++r)
+      cs.pull_into(out_ptr + r * row_stride, (ui32)element_size,
+                   !is_unsigned, comp);
+    return;
+  }
   for (size_t r = 0; r < rows; ++r) {
     line_buf* line = cs.pull(comp);
     const si32* ld = line->i32;
@@ -557,6 +582,20 @@ NB_MODULE(ojph_bindings, m) {
                      ? byte_stride(output, output.ndim() - 1) : byte_stride(output, 1);
 
                  const char* err = nullptr;
+                 if (num_components == 1 &&
+                     self.access_siz().get_recon_width(0) == width &&
+                     self.access_siz().get_recon_height(0) == height &&
+                     rows_pull_into(element_size, is_unsigned, col_stride,
+                                    do_clip, min_val, max_val)) {
+                     nb::gil_scoped_release release;
+                     char* base = static_cast<char*>(output.data());
+                     ui32 comp = 0;
+                     for (size_t h = 0; h < height; ++h)
+                         self.pull_into(base + h * row_stride,
+                                        (ui32)element_size, !is_unsigned,
+                                        comp);
+                     return;
+                 }
                  {
                      nb::gil_scoped_release release;
                      for (ui32 c = 0; c < num_components && !err; ++c) {

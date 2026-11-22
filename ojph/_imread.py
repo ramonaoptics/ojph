@@ -3,6 +3,13 @@ from warnings import warn
 
 from .ojph_bindings import J2CInfile, MemInfile, Codestream
 
+
+def _dtype_for(bit_depth, is_signed):
+    for bits in (8, 16, 32):
+        if bit_depth <= bits:
+            return np.dtype(f"{'i' if is_signed else 'u'}{bits // 8}")
+    raise ValueError(f"Unsupported bit depth: {bit_depth}, signed: {is_signed}")
+
 def imread(
     uri,
     *,
@@ -125,22 +132,7 @@ class OJPHImageFile:
             else:
                 self._shape = (self._num_components,) + self._shape
 
-        bit_depth = siz.get_bit_depth(0)
-        is_signed = siz.is_signed(0)
-        if bit_depth == 8 and not is_signed:
-            self._dtype = np.uint8
-        elif bit_depth == 8 and is_signed:
-            self._dtype = np.int8
-        elif bit_depth == 16 and not is_signed:
-            self._dtype = np.uint16
-        elif bit_depth == 16 and is_signed:
-            self._dtype = np.int16
-        elif bit_depth == 32 and not is_signed:
-            self._dtype = np.uint32
-        elif bit_depth == 32 and is_signed:
-            self._dtype = np.int32
-        else:
-            raise ValueError(f"Unsupported bit depth: {bit_depth}, signed: {is_signed}")
+        self._dtype = _dtype_for(siz.get_bit_depth(0), siz.is_signed(0))
 
     @classmethod
     def from_memory(cls, data, *, channel_order=None, offset=None):
@@ -197,22 +189,7 @@ class OJPHImageFile:
             else:
                 instance._shape = (instance._num_components,) + instance._shape
 
-        bit_depth = siz.get_bit_depth(0)
-        is_signed = siz.is_signed(0)
-        if bit_depth == 8 and not is_signed:
-            instance._dtype = np.uint8
-        elif bit_depth == 8 and is_signed:
-            instance._dtype = np.int8
-        elif bit_depth == 16 and not is_signed:
-            instance._dtype = np.uint16
-        elif bit_depth == 16 and is_signed:
-            instance._dtype = np.int16
-        elif bit_depth == 32 and not is_signed:
-            instance._dtype = np.uint32
-        elif bit_depth == 32 and is_signed:
-            instance._dtype = np.int32
-        else:
-            raise ValueError(f"Unsupported bit depth: {bit_depth}, signed: {is_signed}")
+        instance._dtype = _dtype_for(siz.get_bit_depth(0), siz.is_signed(0))
 
         return instance
 
@@ -354,9 +331,9 @@ class OJPHImageFile:
             # zero-fill of np.zeros would be pure overhead
             image = np.empty(shape, dtype=self._dtype)
         else:
-            if out.dtype != self._dtype:
+            if out.dtype.kind not in 'iu' or out.dtype.itemsize not in (1, 2, 4):
                 raise ValueError(
-                    f"dtype mismatch. out was provided with {out.dtype} but it must be {self._dtype}"
+                    f"dtype mismatch. out must hold 8, 16 or 32-bit integers, not {out.dtype}"
                 )
             # Potentially collapse any additional dimensions.
             # copy=False (numpy >= 2.1) makes numpy raise instead of silently
@@ -364,11 +341,11 @@ class OJPHImageFile:
             image = np.reshape(out, shape, copy=False)
 
 
-        if self._dtype in [np.uint32, np.int32]:
+        if image.dtype.itemsize == 4:
             min_val = None
             max_val = None
         else:
-            iinfo = np.iinfo(self._dtype)
+            iinfo = np.iinfo(image.dtype)
             min_val = iinfo.min
             max_val = iinfo.max
 
