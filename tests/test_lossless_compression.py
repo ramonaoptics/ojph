@@ -1,4 +1,4 @@
-from ojph import imwrite, imread
+from ojph import imread, imread_from_memory, imwrite, imwrite_to_memory
 import numpy as np
 import pytest
 
@@ -282,3 +282,19 @@ def test_lossless_vs_lossy_error_increase(tmp_path):
 
     assert mse_low > 0.0
     assert mse_high > mse_low
+
+@pytest.mark.parametrize('num_decompositions', [0, 1, 3])
+@pytest.mark.parametrize('wavelet', ['rev53', 'rev13', 'rev12'])
+@pytest.mark.parametrize(
+    'dtype', [np.uint8, np.int8, np.uint16, np.int16, np.uint32, np.int32])
+def test_lossless_keeps_the_extremes_of_the_dtype(dtype, wavelet, num_decompositions):
+    info = np.iinfo(dtype)
+    rng = np.random.default_rng(0)
+    data = rng.integers(info.min, info.max, size=(41, 67), dtype=dtype, endpoint=True)
+    data[::5, ::3] = info.min
+    data[1::5, 1::3] = info.max
+
+    decoded = imread_from_memory(imwrite_to_memory(
+        data, wavelet=wavelet, num_decompositions=num_decompositions))
+
+    np.testing.assert_array_equal(decoded, data)
