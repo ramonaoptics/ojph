@@ -88,6 +88,11 @@ def _system_libojph():
             text=True).stdout
 
     version = query('--modversion').strip()
+    minimum = '1.2.0'
+    if subprocess.run([pkg_config, f'--atleast-version={minimum}', 'ojph']).returncode:
+        raise RuntimeError(
+            f'OJPH_SYSTEM_LIBOJPH=1 needs libojph {minimum} or newer; '
+            f'pkg-config found {version}')
     print(f"setup.py: linking the installed libojph {version}")
     split = shlex.split if os.name != 'nt' else str.split
     return split(query('--cflags')), split(query('--libs'))
@@ -128,17 +133,6 @@ if _use_system_libojph:
                 runtime_library_dirs.append(_flag[2:])
         elif _flag.startswith('-l'):
             libraries.append(_flag[2:])
-    if platform.system() == 'Windows' and 'ojph' in libraries:
-        # On MSVC libojph is named ojph.<major>.<minor>.lib, while ojph.pc
-        # says -lojph.
-        for _d in library_dirs:
-            if os.path.isfile(os.path.join(_d, 'ojph.lib')):
-                break
-            _versioned = sorted(glob.glob(os.path.join(_d, 'ojph.*.lib')))
-            if _versioned:
-                libraries[libraries.index('ojph')] = \
-                    os.path.basename(_versioned[-1])[:-len('.lib')]
-                break
 elif _static is not None:
     ojph_include_dir, ojph_archive = _static
     print(f"setup.py: statically linking OpenJPH from {ojph_archive}")

@@ -38,8 +38,9 @@ By default, `pip install .` builds a static copy of the OpenJPH fork in
 extension, which is how the wheels are built. To link a shared libojph that is
 already installed instead, for example from a package manager, set
 `OJPH_SYSTEM_LIBOJPH=1`. `setup.py` then reads the compile and link flags from
-pkg-config's `ojph` module (`ojph.pc`); point `PKG_CONFIG_PATH` at its
-directory if it is not on the default search path:
+pkg-config's `ojph` module (`ojph.pc`), and needs libojph 1.2.0 or newer;
+point `PKG_CONFIG_PATH` at its directory if it is not on the default search
+path:
 
 ```sh
 OJPH_SYSTEM_LIBOJPH=1 PKG_CONFIG_PATH=/path/to/prefix/lib/pkgconfig pip install .
