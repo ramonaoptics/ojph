@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- Lossless encoding with no decomposition (`num_decompositions=0`) kept
+  every sample except the most negative of the declared range: a signed
+  image's minimum decoded as 0, an unsigned image's 0 as half its range.
+  The vendored OpenJPH fork 1.2.1 fixes the encoder; files already written
+  that way keep the lost value.
+
 ## [0.11.0] - 2026-11-22
 
 - `imwrite` and `imwrite_to_memory` take `bit_depth=` and `is_signed=`, to
